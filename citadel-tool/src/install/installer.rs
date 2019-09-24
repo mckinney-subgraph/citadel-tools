@@ -107,7 +107,7 @@ DEFAULT subgraph
 
 LABEL subgraph
     MENU LABEL Subgraph OS
-    LINUX ../bzImage
+    LINUX ../bzImage-$KERNEL_VERSION
     APPEND root=/dev/mapper/rootfs $KERNEL_CMDLINE
 ";
 
