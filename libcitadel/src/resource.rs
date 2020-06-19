@@ -91,7 +91,7 @@ impl ResourceImage {
         &self.path
     }
 
-    fn verity(&self) -> Verity {
+    fn verity(&self) -> Result<Verity> {
         Verity::new(self.path())
     }
 
@@ -171,12 +171,6 @@ impl ResourceImage {
         info!("writing rootfs image to {}", partition.path().display());
         cmd_with_output!("/bin/dd", "if={} of={} bs=4096 skip=1", self.path.display(), partition.path().display())?;
 
-        /*
-        let args = format!("if={} of={} bs=4096 skip=1",
-                           self.path.display(), partition.path().display());
-        util::exec_cmdline_quiet("/bin/dd", args)?;
-        */
-
         self.header.set_status(ImageHeader::STATUS_NEW);
         self.header.write_partition(partition.path())?;
 
@@ -212,7 +206,8 @@ impl ResourceImage {
         if !self.has_verity_hashtree() {
             self.generate_verity_hashtree()?;
         }
-        self.verity().setup(&self.metainfo())
+        let verity = self.verity()?;
+        verity.setup()
     }
 
     pub fn generate_verity_hashtree(&self) -> Result<()> {
@@ -223,8 +218,8 @@ impl ResourceImage {
             self.decompress()?;
         }
         info!("Generating dm-verity hash tree for image {}", self.path.display());
-//        verity::generate_image_hashtree(self.path(), self.metainfo().nblocks(), self.metainfo().verity_salt())?;
-        self.verity().generate_image_hashtree(&self.metainfo())?;
+        let verity = self.verity()?;
+        verity.generate_image_hashtree()?;
         self.header.set_flag(ImageHeader::FLAG_HASH_TREE);
         self.header.write_header_to(self.path())?;
         Ok(())
@@ -235,8 +230,8 @@ impl ResourceImage {
             self.generate_verity_hashtree()?;
         }
         info!("Verifying dm-verity hash tree");
-        self.verity().verify(&self.metainfo())
-//        verity::verify_image(self.path(), &self.metainfo())
+        let verity = self.verity()?;
+        verity.verify()
     }
 
     pub fn generate_shasum(&self) -> Result<String> {

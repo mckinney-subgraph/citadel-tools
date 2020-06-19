@@ -209,3 +209,9 @@ pub fn chown_tree(base: &Path, chown_to: (u32,u32), include_base: bool) -> Resul
     }
     Ok(())
 }
+
+pub fn is_euid_root() -> bool {
+    unsafe {
+        libc::geteuid() == 0
+    }
+}

@@ -5,6 +5,15 @@ use std::path::{Path,PathBuf};
 
 use crate::Result;
 
+///
+/// Create a lockfile and acquire an exclusive lock with flock(2)
+///
+/// The lock can either be acquired by blocking until available or
+/// by failing immediately if the lock is already held.
+///
+/// The lock is released and the lockfile is removed when `FileLock`
+/// instance is dropped.
+///
 pub struct FileLock {
     file: File,
     path: PathBuf,
@@ -12,11 +21,25 @@ pub struct FileLock {
 
 impl FileLock {
 
+    pub fn nonblocking_acquire<P: AsRef<Path>>(path: P) -> Result<Option<Self>> {
+        let file = Self::open_lockfile(path.as_ref())?;
+        let flock = FileLock {
+            file,
+            path: path.as_ref().into(),
+        };
+
+        if flock.lock(false)? {
+            Ok(Some(flock))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn acquire<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let file = Self::open_lockfile(&path)?;
         let flock = FileLock { file, path };
-        flock.lock()?;
+        flock.lock(true)?;
         Ok(flock)
     }
 
@@ -27,6 +50,9 @@ impl FileLock {
             }
         }
 
+        // Make a few attempts just in case we try to open lockfile
+        // at exact moment another process is releasing and deleting
+        // file.
         for _ in 0..3 {
             if let Some(file) = Self::try_create_lockfile(path)? {
                 return Ok(file);
@@ -35,7 +61,7 @@ impl FileLock {
                 return Ok(file);
             }
         }
-        Err(format_err!("unable to acquire lockfile {}", path.display() ))
+        Err(format_err!("unable to open lockfile {}", path.display() ))
     }
 
     fn try_create_lockfile(path: &Path) -> Result<Option<File>> {
@@ -55,18 +81,31 @@ impl FileLock {
     }
 
     fn unlock(&self) -> Result<()> {
-        self.flock(libc::LOCK_UN)
-    }
-
-    fn lock(&self) -> Result<()> {
-        self.flock(libc::LOCK_EX)
-    }
-
-    fn flock(&self, flag: libc::c_int) -> Result<()> {
-        if unsafe { libc::flock(self.file.as_raw_fd(), flag) } < 0 {
-            return Err(Error::last_os_error().into());
-        }
+        self.flock(libc::LOCK_UN, true)?;
         Ok(())
+    }
+
+    fn lock(&self, block: bool) -> Result<bool> {
+        if block {
+            self.flock(libc::LOCK_EX, true)
+        } else {
+            self.flock(libc::LOCK_EX | libc::LOCK_NB, false)
+        }
+    }
+
+    fn flock(&self, flag: libc::c_int, block: bool) -> Result<bool> {
+        if unsafe { libc::flock(self.file.as_raw_fd(), flag) } < 0 {
+            let errno = Self::last_errno();
+            if !block && errno == libc::EWOULDBLOCK {
+                return Ok(false);
+            }
+            return Err(Error::from_raw_os_error(errno).into());
+        }
+        Ok(true)
+    }
+
+    pub fn last_errno() -> i32 {
+        unsafe { *libc::__errno_location() }
     }
 }
 

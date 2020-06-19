@@ -219,11 +219,9 @@ impl <'a> RealmInfoRender <'a> {
             None => return false,
         };
 
-        if let Some(activation) = realmfs.activation() {
-            if activation.is_mountpoint(&mountpoint) {
-                return false;
-            }
-        };
+        if realmfs.is_activated() && realmfs.mountpoint() == mountpoint {
+            return false;
+        }
         true
     }
 

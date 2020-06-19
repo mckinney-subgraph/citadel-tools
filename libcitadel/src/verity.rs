@@ -3,19 +3,25 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions,File};
 use std::io;
 
-use crate::{Result, MetaInfo, Partition, LoopDevice, Mountpoint};
+use crate::{Result, MetaInfo, Partition, LoopDevice, ImageHeader};
+use std::sync::Arc;
 
 
 pub struct Verity {
     image: PathBuf,
+    metainfo: Arc<MetaInfo>,
 }
 
 impl Verity {
     const VERITYSETUP: &'static str = "/sbin/veritysetup";
 
-    pub fn new(image: impl AsRef<Path>) -> Self {
+    pub fn new(image: impl AsRef<Path>) -> Result<Self> {
+        let header = ImageHeader::from_file(image.as_ref())?;
         let image = image.as_ref().to_path_buf();
-        Verity { image }
+        Ok(Verity {
+            image,
+            metainfo: header.metainfo(),
+        })
     }
 
     pub fn generate_initial_hashtree(&self, output: impl AsRef<Path>) -> Result<VerityOutput> {
@@ -25,15 +31,15 @@ impl Verity {
         Ok(VerityOutput::parse(&output))
     }
 
-    pub fn generate_image_hashtree(&self, metainfo: &MetaInfo) -> Result<VerityOutput> {
-        let verity_salt = metainfo.verity_salt();
-        self.generate_image_hashtree_with_salt(metainfo, verity_salt)
+    pub fn generate_image_hashtree(&self) -> Result<VerityOutput> {
+        let verity_salt = self.metainfo.verity_salt();
+        let nblocks = self.metainfo.nblocks();
+        self.generate_image_hashtree_with_salt(verity_salt, nblocks)
     }
 
-    pub fn generate_image_hashtree_with_salt(&self, metainfo: &MetaInfo, salt: &str) -> Result<VerityOutput> {
+    pub fn generate_image_hashtree_with_salt(&self, salt: &str, nblocks: usize) -> Result<VerityOutput> {
 
         let verityfile = self.image.with_extension("verity");
-        let nblocks = metainfo.nblocks();
 
         // Make sure file size is correct or else verity tree will be appended in wrong place
         let meta = self.image.metadata()?;
@@ -54,19 +60,20 @@ impl Verity {
         Ok(vout)
     }
 
-    pub fn verify(&self, metainfo: &MetaInfo) -> Result<bool> {
+    pub fn verify(&self) -> Result<bool> {
         LoopDevice::with_loop(self.path(), Some(4096), true, |loopdev| {
             cmd_ok!(Self::VERITYSETUP, "--hash-offset={} verify {} {} {}",
-            metainfo.nblocks() * 4096,
-            loopdev, loopdev, metainfo.verity_root())
+            self.metainfo.nblocks() * 4096,
+            loopdev, loopdev, self.metainfo.verity_root())
         })
     }
 
-    pub fn setup(&self, metainfo: &MetaInfo) -> Result<String> {
+    pub fn setup(&self) -> Result<String> {
+        info!("creating loop and dm-verity devices for {:?}", self.path());
         LoopDevice::with_loop(self.path(), Some(4096), true, |loopdev| {
-            let devname = Self::device_name(metainfo);
+            let devname = self.device_name();
             let srcdev = loopdev.to_string();
-            Self::setup_device(&srcdev, &devname, metainfo)?;
+            Self::setup_device(&srcdev, &devname, &self.metainfo)?;
             Ok(devname)
         })
     }
@@ -82,19 +89,15 @@ impl Verity {
         cmd!(Self::VERITYSETUP, "close {}", device_name)
     }
 
-    pub fn device_name(metainfo: &MetaInfo) -> String {
-        if metainfo.image_type() == "rootfs" {
+    fn device_name(&self) -> String {
+        if self.metainfo.image_type() == "rootfs" {
             String::from("rootfs")
-        } else if metainfo.image_type() == "realmfs" {
-            let name = metainfo.realmfs_name().unwrap_or("unknown");
-            format!("verity-realmfs-{}-{}", name, metainfo.verity_tag())
+        } else if self.metainfo.image_type() == "realmfs" {
+            let name = self.metainfo.realmfs_name().unwrap_or("unknown");
+            format!("verity-realmfs-{}-{}", name, self.metainfo.verity_tag())
         } else {
-            format!("verity-{}-{}", metainfo.image_type(), metainfo.verity_tag())
+            format!("verity-{}-{}", self.metainfo.image_type(), self.metainfo.verity_tag())
         }
-    }
-
-    pub fn device_name_for_mountpoint(mountpoint: &Mountpoint) -> String {
-        format!("verity-realmfs-{}-{}", mountpoint.realmfs(), mountpoint.tag())
     }
 
     fn setup_device(srcdev: &str, devname: &str, metainfo: &MetaInfo) -> Result<()> {

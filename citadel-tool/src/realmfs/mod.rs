@@ -2,6 +2,7 @@ use clap::App;
 use clap::ArgMatches;
 
 use libcitadel::{Result,RealmFS,Logger,LogLevel};
+use libcitadel::util::is_euid_root;
 use clap::SubCommand;
 use clap::AppSettings::*;
 use clap::Arg;
@@ -45,12 +46,6 @@ is the final absolute size of the image.")
                 .help("Name of new image to create")
                 .required(true)))
 
-        .subcommand(SubCommand::with_name("seal")
-            .about("Seal an unsealed RealmFS image")
-            .arg(Arg::with_name("image")
-                .help("Path or name of RealmFS image to seal")
-                .required(true)))
-
         .subcommand(SubCommand::with_name("autoresize")
             .about("Increase size of RealmFS image if not enough free space remains")
             .arg(Arg::with_name("image")
@@ -85,7 +80,6 @@ is the final absolute size of the image.")
         ("resize", Some(m)) => resize(m),
         ("autoresize", Some(m)) => autoresize(m),
         ("fork", Some(m)) => fork(m),
-        ("seal", Some(m)) => seal(m),
         ("update", Some(m)) => update(m),
         ("activate", Some(m)) => activate(m),
         ("deactivate", Some(m)) => deactivate(m),
@@ -97,7 +91,6 @@ is the final absolute size of the image.")
         exit(1);
     }
 }
-
 
 fn realmfs_image(arg_matches: &ArgMatches) -> Result<RealmFS> {
     let image = match arg_matches.value_of("image") {
@@ -186,28 +179,12 @@ fn fork(arg_matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
-fn seal(arg_matches: &ArgMatches) -> Result<()> {
-    let img = realmfs_image(arg_matches)?;
-    let img_arg = arg_matches.value_of("image").unwrap();
-
-    if img.is_sealed() {
-        info!("RealmFS image {} is already sealed", img_arg);
-    } else if img.is_activated() {
-        info!("RealmFS image {} cannot be sealed because it is currently activated", img_arg);
-    } else {
-        img.seal(None)?;
-    }
-
-    Ok(())
-}
-
 fn update(arg_matches: &ArgMatches) -> Result<()> {
+    if !is_euid_root() {
+        bail!("RealmFS updates must be run as root");
+    }
     let img = realmfs_image(arg_matches)?;
-    let mut update = img.update();
-    update.setup()?;
-    update.open_update_shell()?;
-    update.apply_update()?;
-    update.cleanup()?;
+    img.interactive_update(Some("icy"))?;
     Ok(())
 }
 
@@ -215,17 +192,12 @@ fn activate(arg_matches: &ArgMatches) -> Result<()> {
     let img = realmfs_image(arg_matches)?;
     let img_arg = arg_matches.value_of("image").unwrap();
 
-    let activation = if let Some(activation) = img.activation() {
+    if img.is_activated() {
         info!("RealmFS image {} is already activated", img_arg);
-        activation
     } else {
-        info!("Activating {}", img_arg);
-        img.activate()?
-    };
-    info!("Read-Only  mountpoint: {}", activation.mountpoint());
-    if let Some(rw) = activation.mountpoint_rw() {
-        info!("Read-Write mountpoint: {}", rw);
+        img.activate()?;
     }
+    info!("Mountpoint: {}", img.mountpoint());
     Ok(())
 }
 
@@ -238,7 +210,7 @@ fn deactivate(arg_matches: &ArgMatches) -> Result<()> {
         info!("Cannot deactivate RealmFS image {} because it is currently in use", img_arg);
     } else {
         info!("Deactivating {}", img_arg);
-        img.deactivate()?;
+        img.deactivate();
     }
     Ok(())
 }

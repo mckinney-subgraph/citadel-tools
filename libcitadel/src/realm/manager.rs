@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use crate::{Mountpoint, Activation,Result, Realms, RealmFS, Realm, util};
+use crate::{Mountpoint, Result, Realms, RealmFS, Realm, util};
 use crate::realmfs::realmfs_set::RealmFSSet;
 
 use super::systemd::Systemd;
@@ -125,14 +125,11 @@ impl RealmManager {
         self.inner().realms.active(ignore_system)
     }
 
-    /// Return a list of Realms that are using the `activation`
-    pub fn realms_for_activation(&self, activation: &Activation) -> Vec<Realm> {
+    /// Return a list of Realms that are using `mountpoint`
+    pub fn realms_for_mountpoint(&self, mountpoint: &Mountpoint) -> Vec<Realm> {
         self.active_realms(false)
             .into_iter()
-            .filter(|r| {
-                r.realmfs_mountpoint()
-                    .map_or(false, |mp| activation.is_mountpoint(&mp))
-            })
+            .filter(|r| r.has_mountpoint(mountpoint))
             .collect()
     }
 
@@ -148,30 +145,15 @@ impl RealmManager {
         self.inner().realmfs_set.by_name(name)
     }
 
-    /// Notify `RealmManager` that `mountpoint` has been released by a
-    /// `Realm`.
+    /// If mountpoint is no longer in use by another `Realm` deactivate it.
     pub fn release_mountpoint(&self, mountpoint: &Mountpoint) {
         info!("releasing mountpoint: {}", mountpoint);
         if !mountpoint.is_valid() {
             warn!("bad mountpoint {} passed to release_mountpoint()", mountpoint);
             return;
         }
-
-        if let Some(realmfs) = self.realmfs_by_name(mountpoint.realmfs()) {
-            if realmfs.release_mountpoint(mountpoint) {
-                return;
-            }
-        }
-
-        if let Some(activation) = Activation::for_mountpoint(mountpoint) {
-            let active = self.active_mountpoints();
-            if let Err(e) = activation.deactivate(&active) {
-                warn!("error on detached deactivation for {}: {}",activation.device(), e);
-            } else {
-                info!("Deactivated detached activation for device {}", activation.device());
-            }
-        } else {
-            warn!("No activation found for released mountpoint {}", mountpoint);
+        if !self.realmfs_mountpoint_in_use(mountpoint) {
+            mountpoint.deactivate();
         }
     }
 
@@ -182,6 +164,12 @@ impl RealmManager {
             .iter()
             .flat_map(Realm::realmfs_mountpoint)
             .collect()
+    }
+
+    pub fn realmfs_mountpoint_in_use(&self, mountpoint: &Mountpoint) -> bool {
+        self.active_realms(false)
+            .iter()
+            .any(|r| r.has_mountpoint(mountpoint))
     }
 
     pub fn start_boot_realms(&self) -> Result<()> {
@@ -387,7 +375,7 @@ impl RealmManager {
         if realmfs.is_in_use() {
             bail!("Cannot delete realmfs because it is in use");
         }
-        realmfs.deactivate()?;
+        realmfs.deactivate();
         if realmfs.is_activated() {
             bail!("Unable to deactive Realmfs, cannot delete");
         }

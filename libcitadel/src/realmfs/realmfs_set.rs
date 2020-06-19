@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use crate::{RealmFS, RealmManager, Result};
-use std::sync::Arc;
 use std::fs;
+use std::sync::Arc;
+
+use crate::{RealmFS, RealmManager, Result};
 
 pub struct RealmFSSet {
     realmfs_map: HashMap<String, RealmFS>,

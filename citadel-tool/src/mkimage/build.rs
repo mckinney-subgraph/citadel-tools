@@ -121,7 +121,8 @@ impl UpdateBuilder {
         let hashfile = self.config.workdir_path(self.verity_filename());
         let outfile = self.config.workdir_path("verity-format.out");
 
-        let output = Verity::new(self.image()).generate_initial_hashtree(&hashfile)?;
+        let verity = Verity::new(self.image())?;
+        let output = verity.generate_initial_hashtree(&hashfile)?;
 
         fs::write(outfile, output.output())
             .context("failed to write veritysetup command output to a file")?;

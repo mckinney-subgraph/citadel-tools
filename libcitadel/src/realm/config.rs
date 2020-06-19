@@ -99,9 +99,6 @@ pub struct RealmConfig {
 
     pub realmfs: Option<String>,
 
-    #[serde(rename="realmfs-write")]
-    pub realmfs_write: Option<bool>,
-
     #[serde(rename="terminal-scheme")]
     pub terminal_scheme: Option<String>,
 
@@ -205,7 +202,6 @@ impl RealmConfig {
             extra_bindmounts_ro: None,
             realm_depends: None,
             realmfs: Some(DEFAULT_REALMFS.into()),
-            realmfs_write: Some(false),
             overlay: Some(DEFAULT_OVERLAY.into()),
             terminal_scheme: None,
             netns: None,
@@ -235,7 +231,6 @@ impl RealmConfig {
             realm_depends: None,
             ephemeral_persistent_dirs: None,
             realmfs: None,
-            realmfs_write: None,
             overlay: None,
             terminal_scheme: None,
             netns: None,
@@ -380,11 +375,6 @@ impl RealmConfig {
     pub fn realmfs(&self) -> &str {
         self.str_value(|c| c.realmfs.as_ref()).unwrap_or(DEFAULT_REALMFS)
     }
-
-    pub fn realmfs_write(&self) -> bool {
-        self.bool_value(|c| c.realmfs_write)
-    }
-
 
     /// Name of a terminal color scheme to use in this realm.
     pub fn terminal_scheme(&self) -> Option<&str> {

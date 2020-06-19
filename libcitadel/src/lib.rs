@@ -35,7 +35,6 @@ mod realm;
 pub mod terminal;
 mod system;
 
-
 pub use crate::config::OsRelease;
 pub use crate::blockdev::BlockDev;
 pub use crate::cmdline::CommandLine;
@@ -43,10 +42,10 @@ pub use crate::header::{ImageHeader,MetaInfo};
 pub use crate::partition::Partition;
 pub use crate::resource::ResourceImage;
 pub use crate::keys::{KeyPair,PublicKey,Signature};
-pub use crate::realmfs::{RealmFS,Mountpoint,Activation};
+pub use crate::realmfs::{RealmFS,Mountpoint};
 pub use crate::keyring::{KeyRing,KernelKey};
 pub use crate::exec::{Exec,FileRange};
-pub use crate::realmfs::resizer::{ImageResizer,ResizeSize};
+pub use crate::realmfs::resizer::ResizeSize;
 pub use crate::realm::overlay::RealmOverlay;
 pub use crate::realm::realm::Realm;
 pub use crate::realm::config::{RealmConfig,OverlayType,GLOBAL_CONFIG};

@@ -85,8 +85,8 @@ impl ItemListContent<RealmFS> for RealmFSListContent {
     }
 
     fn on_event(&mut self, item: Option<&RealmFS>, event: Event) -> EventResult {
-        let (activated,sealed,user) = item.map(|r| (r.is_activated(), r.is_sealed(), r.is_user_realmfs()))
-            .unwrap_or((false, false, false));
+        let (activated,user) = item.map(|r| (r.is_activated(), r.is_user_realmfs()))
+            .unwrap_or((false, false));
 
         match event {
             Event::Key(Key::Enter) => RealmFSAction::activate_realmfs(activated),
@@ -96,8 +96,6 @@ impl ItemListContent<RealmFS> for RealmFSListContent {
             Event::Char('r') => RealmFSAction::resize_realmfs(),
             Event::Char('u') => RealmFSAction::update_realmfs(),
             Event::Char('n') => RealmFSAction::fork_realmfs(),
-            Event::Char('s') => RealmFSAction::seal_realmfs(sealed),
-            Event::Char('S') => RealmFSAction::unseal_realmfs(sealed),
             Event::Char('e') => RealmFSAction::edit_notes(),
             Event::Char('.') => {
                 self.show_system = !self.show_system;
@@ -129,17 +127,15 @@ impl <'a> RealmFSInfoRender <'a> {
     fn render_realmfs(&mut self) {
         let r = self.realmfs;
 
-        if r.is_sealed() && r.is_user_realmfs() {
-            self.heading("Sealed RealmFS");
-        } else if r.is_sealed() {
-            self.heading("System RealmFS");
+        if r.is_user_realmfs() {
+            self.heading("User RealmFS");
         } else {
-            self.heading("Unsealed RealmFS");
+            self.heading("System RealmFS");
         }
 
         self.print("  ").render_name();
 
-        if r.is_sealed() && !r.is_user_realmfs() {
+        if !r.is_user_realmfs() {
             self.print(format!(" (channel={})", r.metainfo().channel()));
         }
 
@@ -171,7 +167,7 @@ impl <'a> RealmFSInfoRender <'a> {
 
         match sizes(r) {
             Ok((free,allocated)) => {
-                let size = r.metainfo_nblocks();
+                let size = r.metainfo().nblocks() + 1;
 
                 let used = size - free;
                 let used_percent = (used as f64 * 100.0) / (size as f64);
@@ -203,14 +199,12 @@ impl <'a> RealmFSInfoRender <'a> {
     }
 
     fn render_activation(&mut self) {
+        if !self.realmfs.is_activated() {
+            return;
+        }
 
-        let activation = match self.realmfs.activation() {
-            Some(activation) => activation,
-            None => return,
-        };
-
-        let realms = self.realmfs.manager()
-            .realms_for_activation(&activation);
+        let mountpoint = self.realmfs.mountpoint();
+        let realms = self.realmfs.manager().realms_for_mountpoint(&mountpoint);
 
         if !realms.is_empty() {
             self.heading("In Use")
@@ -225,25 +219,18 @@ impl <'a> RealmFSInfoRender <'a> {
             self.heading("Active").newlines(2);
         }
 
+        let devname = self.realmfs.mountpoint().verity_device();
         self.print("   Device : ")
             .dim_style()
-            .println(activation.device())
+            .println(devname)
             .pop();
 
-        let mount = if activation.mountpoint_rw().is_some() { "Mounts" } else { "Mount "};
-        self.print(format!("   {} : ", mount))
+        self.print("    Mount : ")
             .dim_style()
-            .print(format!("{}", activation.mountpoint()))
+            .print(format!("{}", self.realmfs.mountpoint()))
             .pop()
             .newline();
 
-        if let Some(rw) = activation.mountpoint_rw() {
-            self.print("            ")
-                .dim_style()
-                .print(format!("{}", rw))
-                .pop()
-                .newline();
-        }
         self.newline();
     }
 

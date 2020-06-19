@@ -20,7 +20,7 @@ const METAINFO_OFFSET: usize = 8;
 const SIGNATURE_LENGTH: usize = 64;
 
 /// Maximum amount of space in block for metainfo document
-const MAX_METAINFO_LEN: usize = (ImageHeader::HEADER_SIZE - (METAINFO_OFFSET + SIGNATURE_LENGTH));
+const MAX_METAINFO_LEN: usize = ImageHeader::HEADER_SIZE - (METAINFO_OFFSET + SIGNATURE_LENGTH);
 
 fn is_valid_status_code(code: u8) -> bool {
     code <= ImageHeader::STATUS_BAD_META
@@ -333,6 +333,12 @@ impl ImageHeader {
         self.read_u16(6) as usize
     }
 
+    pub fn update_metainfo<P: AsRef<Path>>(&self, metainfo_bytes: &[u8], signature: &[u8], path: P) -> Result<()> {
+        self.set_metainfo_bytes(metainfo_bytes)?;
+        self.set_signature(signature)?;
+        self.write_header_to(path)
+    }
+
     pub fn set_metainfo_bytes(&self, bytes: &[u8]) -> Result<()> {
         let metainfo = MetaInfo::parse_bytes(bytes)
             .ok_or_else(|| format_err!("Could not parse metainfo bytes as valid metainfo document"))?;
@@ -524,8 +530,8 @@ impl MetaInfo {
         &self.verity_salt
     }
 
-    pub fn verity_tag(&self) -> String {
-        self.verity_root().chars().take(8).collect()
+    pub fn verity_tag(&self) -> &str {
+        &self.verity_root()[..8]
     }
 }
 

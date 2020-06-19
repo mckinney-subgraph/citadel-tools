@@ -11,12 +11,12 @@ use crate::item_list::ItemList;
 use crate::realmfs::fork_dialog::ForkDialog;
 use crate::notes::NotesDialog;
 
-type ActionCallback = Fn(&RealmFS)+Send+Sync;
+type ActionCallback = dyn Fn(&RealmFS)+Send+Sync;
 
 #[derive(Clone)]
 pub struct RealmFSAction {
     realmfs: RealmFS,
-    sink: Sender<Box<CbFunc>>,
+    sink: Sender<Box<dyn CbFunc>>,
     callback: Arc<ActionCallback>
 }
 
@@ -37,9 +37,7 @@ impl RealmFSAction {
         }
 
         EventResult::with_cb(|s| {
-            let action = RealmFSAction::new(s, Arc::new(|r| {
-                Self::log_fail("deactivating realmfs", || r.deactivate());
-            }));
+            let action = RealmFSAction::new(s, Arc::new(|r| { r.deactivate(); }));
 
             if action.realmfs.is_in_use() {
                 s.add_layer(Dialog::info("RealmFS is in use and cannot be deactivated").title("Cannot Deactivate"));
@@ -65,45 +63,6 @@ impl RealmFSAction {
         EventResult::Consumed(None)
     }
 
-    pub fn seal_realmfs(sealed: bool) -> EventResult {
-        if sealed {
-            return EventResult::Consumed(None);
-        }
-
-        EventResult::with_cb(|s| {
-            let action = RealmFSAction::new(s, Arc::new(|r| {
-                Self::log_fail("sealing realmfs", || r.seal(None));
-            }));
-            if action.realmfs.is_sealed() {
-                return;
-            }
-            if action.realmfs.is_activated() {
-                s.add_layer(Dialog::info("Cannot seal realmfs because it is currently activated. Deactivate first").title("Cannot Seal"));
-                return;
-            }
-            if !action.realmfs.has_sealing_keys() {
-                s.add_layer(Dialog::info("Cannot seal realmfs because no keys are available to sign image.").title("Cannot Seal"));
-                return;
-            }
-            let title = "Seal RealmFS?";
-            let msg = format!("Would you like to seal RealmFS '{}'?", action.realmfs.name());
-            let dialog = confirm_dialog(title, &msg, move |_| action.run_action());
-            s.add_layer(dialog);
-        })
-    }
-
-    pub fn unseal_realmfs(sealed: bool) -> EventResult {
-        if !sealed {
-            return EventResult::Consumed(None);
-        }
-        let title = "Unseal RealmFS?";
-        let msg = "Do you want to unseal '$REALMFS'";
-
-        Self::confirm_action(title, msg, |r| {
-            Self::log_fail("unsealing realmfs", || r.unseal());
-        })
-    }
-
     pub fn delete_realmfs(user: bool) -> EventResult {
         if !user {
             return EventResult::Consumed(None);
@@ -112,8 +71,7 @@ impl RealmFSAction {
         let msg = "Are you sure you want to delete '$REALMFS'?";
 
         let cb = Self::wrap_callback(|r| {
-            let manager = r.manager();
-            if let Err(e) = manager.delete_realmfs(r) {
+            if let Err(e) = r.delete() {
                 warn!("error deleting realmfs: {}", e);
             }
         });
@@ -208,19 +166,6 @@ impl RealmFSAction {
         where F: Fn(&RealmFS), F: 'static + Send + Sync,
     {
         Arc::new(callback)
-    }
-
-    pub fn confirm_action<F>(title: &'static str, message: &'static str, callback: F) -> EventResult
-        where F: Fn(&RealmFS), F: 'static + Send+Sync,
-    {
-        let callback = Arc::new(callback);
-
-        EventResult::with_cb(move |s| {
-            let action = RealmFSAction::new(s, callback.clone());
-            let message = message.replace("$REALMFS", action.realmfs.name());
-            let dialog = confirm_dialog(title, &message, move |_| action.run_action());
-            s.add_layer(dialog);
-        })
     }
 
     fn new(s: &mut Cursive, callback: Arc<ActionCallback>) -> RealmFSAction {

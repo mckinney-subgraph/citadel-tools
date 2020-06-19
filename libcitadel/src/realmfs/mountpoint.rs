@@ -1,16 +1,28 @@
-use std::fs::{self, DirEntry};
+use std::ffi::OsStr;
 use std::fmt;
+use std::fs::{self, DirEntry};
 use std::path::{PathBuf, Path};
 
-use crate::{Result, RealmFS};
-use std::ffi::OsStr;
+use crate::{Result, RealmFS, CommandLine, ImageHeader};
+use crate::verity::Verity;
 
 
-/// A RealmFS activation mountpoint
+/// Represents the path at which a RealmFS is mounted and manages RealmFS activation and
+/// deactivation.
+///
+/// Activation of a RealmFS involves:
+///
+/// 1. create mountpoint directory
+/// 2. create loop and dm-verity device for image file
+/// 3. Mount dm-verity device at mountpoint directory
+///
+/// Deactivation reverses these steps.
+///
 #[derive(Clone,Eq,PartialEq,Hash,Debug)]
 pub struct Mountpoint(PathBuf);
 
 impl Mountpoint {
+    const MOUNT: &'static str = "/usr/bin/mount";
     const UMOUNT: &'static str = "/usr/bin/umount";
 
     /// Read `RealmFS::RUN_DIRECTORY` to collect all current mountpoints
@@ -22,13 +34,6 @@ impl Mountpoint {
             .filter(Mountpoint::is_valid)
             .collect();
         Ok(all)
-    }
-
-    /// Return a read-only/read-write mountpoint pair.
-    pub fn new_loop_pair(realmfs: &str) -> (Self,Self) {
-        let ro = Self::new(realmfs, "ro");
-        let rw = Self::new(realmfs, "rw");
-        (ro, rw)
     }
 
     /// Build a new `Mountpoint` from the provided realmfs `name` and `tag`.
@@ -46,19 +51,106 @@ impl Mountpoint {
         self.0.exists()
     }
 
-    pub fn create_dir(&self) -> Result<()> {
+    fn create_dir(&self) -> Result<()> {
         fs::create_dir_all(self.path())?;
         Ok(())
     }
 
-    /// Deactivate this mountpoint by unmounting it and removing the directory.
-    pub fn deactivate(&self) -> Result<()> {
-        if self.exists() {
-            info!("Unmounting {} and removing directory", self);
-            cmd!(Self::UMOUNT, "{}", self)?;
-            fs::remove_dir(self.path())?;
+    pub fn is_mounted(&self) -> bool {
+        // test for an arbitrary expected directory
+        self.path().join("etc").exists()
+    }
+
+    fn mount<P: AsRef<Path>>(&self, source: P) -> Result<()> {
+        cmd!(Self::MOUNT, "-oro {} {}",
+            source.as_ref().display(),
+            self.path().display()
+        )
+    }
+
+    pub fn activate(&self, realmfs: &RealmFS) -> Result<()> {
+        if self.is_mounted() {
+            return Ok(())
         }
+
+        if !self.exists() {
+            self.create_dir()?;
+        }
+        let verity_path = self.verity_device_path();
+        if verity_path.exists() {
+            warn!("dm-verity device {:?} already exists which was not expected", verity_path);
+        } else if let Err(err) = self.setup_verity(realmfs) {
+            let _ = fs::remove_dir(self.path());
+            return Err(err);
+        }
+
+        if let Err(err) = self.mount(verity_path) {
+            self.deactivate();
+            Err(err)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn setup_verity(&self, realmfs: &RealmFS) -> Result<()> {
+        if !CommandLine::nosignatures() {
+            realmfs.verify_signature()?;
+        }
+        if !realmfs.header().has_flag(ImageHeader::FLAG_HASH_TREE) {
+            self.generate_verity(realmfs)?;
+        }
+        let verity = Verity::new(realmfs.path())?;
+        verity.setup()?;
         Ok(())
+    }
+
+    fn generate_verity(&self, realmfs: &RealmFS) -> Result<()> {
+        info!("Generating verity hash tree");
+        let verity = Verity::new(realmfs.path())?;
+        verity.generate_image_hashtree()?;
+        realmfs.header().set_flag(ImageHeader::FLAG_HASH_TREE);
+        realmfs.header().write_header_to(self.path())?;
+        info!("Done generating verity hash tree");
+        Ok(())
+    }
+
+    /// Deactivate this mountpoint by unmounting it and removing the directory.
+    pub fn deactivate(&self) {
+        if !self.exists() {
+            return;
+        }
+        info!("Unmounting {} and removing directory", self);
+
+        // 1. Unmount directory
+        if self.is_mounted() {
+            if let Err(err) = cmd!(Self::UMOUNT, "{}", self) {
+                warn!("Failed to unmount directory {}: {}", self, err);
+            }
+        }
+
+        // 2. Remove dm-verity device
+        let verity = self.verity_device_path();
+        if verity.exists() {
+            if let Err(err) = Verity::close_device(self.verity_device().as_str()) {
+                warn!("Failed to remove dm-verity device {:?}: {}", verity, err);
+            }
+        }
+
+        // 3. Remove directory
+        if let Err(err) = fs::remove_dir(self.path()) {
+            warn!("Failed to remove mountpoint directory {}: {}", self, err);
+        }
+
+    }
+
+    fn verity_device_path(&self) -> PathBuf {
+        Path::new("/dev/mapper")
+            .join(self.verity_device())
+    }
+
+    // Return the name of the dm-verity device associated with this mountpoint
+    pub fn verity_device(&self) -> String {
+        format!("verity-realmfs-{}-{}", self.realmfs(), self.tag())
     }
 
     /// Full `&Path` of mountpoint.

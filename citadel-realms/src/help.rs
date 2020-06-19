@@ -31,7 +31,6 @@ pub fn help_panel(screen: usize) -> impl View {
                 .child(help_header("RealmsFS Image Commands"))
                 .child(DummyView)
                 .child(help_item("n", "Create new RealmFS as fork of selected image."))
-                .child(help_item("s", "Seal selected RealmFS image."))
                 .child(help_item("u", "Open shell to update selected RealmFS image."))
                 .child(help_item(".", "Toggle display of system RealmFS images."))
                 .child(DummyView)

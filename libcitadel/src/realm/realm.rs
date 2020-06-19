@@ -6,12 +6,12 @@ use std::os::unix::fs::MetadataExt;
 
 
 use super::overlay::RealmOverlay;
-use super::config::{RealmConfig,GLOBAL_CONFIG,OverlayType};
+use super::config::{RealmConfig,GLOBAL_CONFIG};
 use super::realms::Realms;
 use super::systemd::Systemd;
 
-use crate::realmfs::{Mountpoint, Activation};
-use crate::{symlink, util, Result, RealmFS, CommandLine, RealmManager};
+use crate::realmfs::Mountpoint;
+use crate::{symlink, util, Result, RealmFS, CommandLine, RealmManager, OverlayType};
 
 
 const MAX_REALM_NAME_LEN:usize = 128;
@@ -138,6 +138,15 @@ impl Realm {
         &self.name
     }
 
+    // Return true if this `Realm` has an active RealmFS mountpoint and
+    // that mountpoint matches 'mountpoint'
+    pub fn has_mountpoint(&self, mountpoint: &Mountpoint) -> bool {
+        self.realmfs_mountpoint()
+            .map(|mp| &mp == mountpoint)
+            .unwrap_or(false)
+    }
+
+    // Return a `Mountpoint` instance for the RealmFS used by this `Realm`
     pub fn realmfs_mountpoint(&self) -> Option<Mountpoint> {
         symlink::read(self.realmfs_mountpoint_symlink())
             .map(Into::into)
@@ -204,19 +213,17 @@ impl Realm {
     ///
     ///   1) Find the RealmFS for this realm and activate it if not yet activated.
     ///   2) If this realm is configured to use an overlay, set it up.
-    ///   3) If the RealmFS is unsealed, choose between ro/rw mountpoints
-    ///   4) create 'rootfs' symlink in realm run path pointing to rootfs base
-    ///   5) create 'realmfs-mountpoint' symlink pointing to realmfs mount
+    ///   3) create 'rootfs' symlink in realm run path pointing to rootfs base
+    ///   4) create 'realmfs-mountpoint' symlink pointing to realmfs mount
     ///
     pub fn setup_rootfs(&self) -> Result<PathBuf> {
         let realmfs = self.get_named_realmfs(self.config().realmfs())?;
 
-        let activation = realmfs.activate()?;
-        let writeable =  self.use_writable_mountpoint(&realmfs);
-        let mountpoint = self.choose_mountpoint(writeable, &activation)?;
+        realmfs.activate()?;
+        let mountpoint = realmfs.mountpoint();
 
         let rootfs = match RealmOverlay::for_realm(self) {
-            Some(ref overlay) if !writeable => overlay.create(mountpoint.path())?,
+            Some(ref overlay) => overlay.create(mountpoint.path())?,
             _ => mountpoint.path().to_owned(),
         };
 
@@ -225,16 +232,6 @@ impl Realm {
         symlink::write(self.base_path().join("home"), self.run_path().join("home"), false)?;
 
         Ok(rootfs)
-    }
-
-    fn choose_mountpoint<'a>(&self, writeable: bool, activation: &'a Activation) -> Result<&'a Mountpoint> {
-        if !writeable {
-            Ok(activation.mountpoint())
-        } else if let Some(mountpoint) = activation.mountpoint_rw() {
-            Ok(mountpoint)
-        } else {
-            Err(format_err!("RealmFS activation does not have writable mountpoint as expected"))
-        }
     }
 
     /// Clean up the rootfs created when starting this realm.
@@ -263,13 +260,6 @@ impl Realm {
     fn remove_symlink(path: PathBuf) {
         if let Err(e) = symlink::remove(&path) {
             warn!("failed to remove symlink {}: {}", path.display(), e);
-        }
-    }
-
-    fn use_writable_mountpoint(&self, realmfs: &RealmFS) -> bool {
-        match realmfs.metainfo().realmfs_owner() {
-            Some(name) => !realmfs.is_sealed() && name == self.name(),
-            None => false,
         }
     }
 
@@ -385,15 +375,13 @@ impl Realm {
         result
     }
 
-    /// Return `true` if this realm is configured to use a read-only RealmFS mount.
+    /// Return `true` if this realm is configured to use a read-only root filesytem.
+    ///
+    /// Since either type of overlay will produce a writable root filesystem the
+    /// rootfs is only read-only if no overlay is configured.
+    ///
     pub fn readonly_rootfs(&self) -> bool {
-        if self.config().overlay() != OverlayType::None {
-            false
-        } else if CommandLine::sealed() {
-            true
-        } else {
-            !self.config().realmfs_write()
-        }
+        self.config().overlay() == OverlayType::None
     }
 
     /// Return path to root directory as seen by mount namespace inside the realm container
@@ -449,7 +437,6 @@ impl Realm {
     /// is the run path of the realm.
     pub fn is_current(&self) -> bool {
         Realms::read_current_realm_symlink() == Some(self.run_path())
-        //Realms::current_realm_name().as_ref() == Some(&self.name)
     }
 
     /// Return `true` if this realm is the default realm.

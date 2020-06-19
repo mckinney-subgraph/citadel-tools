@@ -10,11 +10,10 @@ use crate::theme::{ThemeHandler, ThemeChooser};
 use crate::terminal::TerminalTools;
 use crate::logview::TextContentLogOutput;
 use std::sync::{Arc,RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::{mem, io};
+use std::mem;
 use crate::item_list::ItemList;
 use crate::realm::RealmListContent;
 use crate::realmfs::RealmFSListContent;
-use std::io::Write;
 
 #[derive(Clone)]
 pub enum DeferredAction {
@@ -325,54 +324,6 @@ impl RealmUI {
     }
 
     fn run_realmfs_update(&self, realmfs: &RealmFS) -> Result<()> {
-        self.with_termtools(|tt| {
-            tt.apply_base16_by_slug("icy");
-            tt.set_window_title(format!("Update {}-realmfs.img", realmfs.name()));
-            tt.clear_screen();
-        });
-
-        let mut update = realmfs.update();
-        update.setup()?;
-
-        if let Some(size) = update.auto_resize_size() {
-            println!("Resizing image to {} gb", size.size_in_gb());
-            update.apply_resize(size)?;
-        }
-
-        println!();
-        println!("Opening update shell for '{}-realmfs.img'", realmfs.name());
-        println!();
-        println!("Exit shell with ctrl-d or 'exit' to return to realm manager");
-        println!();
-        update.open_update_shell()?;
-
-        if realmfs.is_sealed() {
-            if self.prompt_user("Apply changes?", true)? {
-                update.apply_update()
-            } else {
-                update.cleanup()
-            }
-        } else {
-            update.apply_update()?;
-            if !realmfs.is_activated() && self.prompt_user("Seal RealmFS?", true)? {
-                realmfs.seal(None)?;
-            }
-            Ok(())
-        }
+        realmfs.interactive_update(Some("icy"))
     }
-
-    fn prompt_user(&self, prompt: &str, default_y: bool) -> Result<bool> {
-        let yn = if default_y { "(Y/n)" } else { "(y/N)" };
-        print!("{} {} : ", prompt, yn);
-        io::stdout().flush()?;
-        let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
-
-        let yes = match line.trim().chars().next() {
-            Some(c) => c == 'Y' || c == 'y',
-            None => default_y,
-        };
-        Ok(yes)
-    }
-
 }
