@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+<requires lib="gtk+" version="3.24"/>
+<object class="GtkWindow" id="main-window">
+  <property name="width_request">600</property>
+  <property name="decorated">False</property>
+  <property name="modal">True</property>
+  <property name="window_position">center</property>
+  <style>
+    <class name="main-window" />
+  </style>
+
+  <child>
+    <object class="GtkBox" id="main-box">
+      <property name="orientation">vertical</property>
+      <property name="spacing">20</property>
+      <property name="margin_left">20</property>
+      <property name="margin_right">20</property>
+      <property name="margin_top">20</property>
+      <property name="margin_bottom">20</property>
+
+      <child>
+        <object class="GtkBox" id="current-realm-box">
+          <property name="orientation">horizontal</property>
+          <property name="spacing">10</property>
+
+          <child>
+            <object class="GtkImage" id="current-realm-icon">
+              <property name="icon-name">computer</property>
+            </object>
+            <packing>
+              <property name="expand">False</property>
+              <property name="fill">False</property>
+              <property name="position">0</property>
+            </packing>
+          </child>
+
+          <child>
+            <object class="GtkLabel" id="current-realm">
+              <property name="halign">start</property>
+              <style>
+                <class name="current-realm" />
+              </style>
+            </object>
+            <packing>
+              <property name="expand">False</property>
+              <property name="fill">False</property>
+              <property name="position">1</property>
+            </packing>
+          </child>
+        </object>
+        <packing>
+            <property name="expand">False</property>
+            <property name="fill">False</property>
+            <property name="position">0</property>
+        </packing>
+      </child>
+
+      <child>
+        <object class="GtkBox" id="input-box">
+          <child>
+            <object class="GtkEntry" id="input-entry">
+              <style>
+                <class name="input-entry" />
+              </style>
+            </object>
+            <packing>
+              <property name="expand">True</property>
+              <property name="fill">True</property>
+              <property name="position">1</property>
+            </packing>
+          </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="GtkBox" id="result-box">
+          <property name="orientation">vertical</property>
+          <property name="homogeneous">True</property>
+          <style>
+            <class name="result-box"/>
+          </style>
+      </object>
+      <packing>
+        <property name="expand">False</property>
+        <property name="fill">True</property>
+        <property name="position">2</property>
+      </packing>
+    </child>
+
+  </object>
+  </child>
+
+</object>
+</interface>

@@ -1,17 +1,20 @@
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::{result, thread};
 
 use dbus::tree::{self, Factory, MTFn, MethodResult, Tree, MethodErr};
 use dbus::{Connection, NameFlag, Message};
-use libcitadel::{Result, RealmManager, Realm, RealmEvent};
+use libcitadel::{Result, RealmManager, Realm, RealmEvent, OverlayType, RealmFS, terminal};
 use std::fmt;
 
 type MethodInfo<'a> = tree::MethodInfo<'a, MTFn<TData>, TData>;
 
-const STATUS_REALM_NOT_RUNNING: u8 = 0;
-const STATUS_REALM_RUNNING_NOT_CURRENT: u8 = 1;
-const STATUS_REALM_RUNNING_CURRENT: u8 = 2;
+// XXX
+const UPDATE_TOOL_PATH: &str = "/realms/Shared/citadel-realmfs";
+const SUDO_PATH: &str = "/usr/bin/sudo";
+
+const STATUS_REALM_RUNNING: u8 = 1;
+const STATUS_REALM_CURRENT: u8 = 2;
+const STATUS_REALM_SYSTEM_REALM: u8  = 4;
 
 const OBJECT_PATH: &str = "/com/subgraph/realms";
 const INTERFACE_NAME: &str = "com.subgraph.realms.Manager";
@@ -47,12 +50,15 @@ impl DbusServer {
                 .out_arg(("name", "s")))
 
             .add_m(f.method("List", (), Self::do_list)
-                .out_arg(("realms", "a{sy}")))
+                .out_arg(("realms", "a(sssy)")))
 
             .add_m(f.method("Start", (), Self::do_start)
                 .in_arg(("name", "s")))
 
             .add_m(f.method("Stop", (), Self::do_stop)
+                .in_arg(("name", "s")))
+
+            .add_m(f.method("Restart", (), Self::do_restart)
                 .in_arg(("name", "s")))
 
             .add_m(f.method("Terminal", (), Self::do_terminal)
@@ -65,6 +71,16 @@ impl DbusServer {
             .add_m(f.method("RealmFromCitadelPid", (), Self::do_pid_to_realm)
                 .in_arg(("pid", "u"))
                 .out_arg(("realm", "s")))
+
+            .add_m(f.method("RealmConfig", (), Self::do_get_realm_config)
+                       .in_arg(("name", "s"))
+                       .out_arg(("config", "a(ss)")))
+
+            .add_m(f.method("ListRealmFS", (), Self::do_list_realmfs)
+                .out_arg(("realmfs", "as")))
+
+            .add_m(f.method("UpdateRealmFS", (), Self::do_update)
+                .in_arg(("name", "s")))
 
             // Signals
             .add_s(f.signal("RealmStarted", ())
@@ -136,6 +152,20 @@ impl DbusServer {
         Ok(vec![m.msg.method_return()])
     }
 
+    fn do_restart(m: &MethodInfo) -> MethodResult {
+        let name = m.msg.read1()?;
+        let data = m.tree.get_data().clone();
+        let realm = data.realm_by_name(name)?;
+        thread::spawn(move || {
+            if let Err(e) = data.manager().stop_realm(&realm) {
+                warn!("failed to stop realm {}: {}", realm.name(), e);
+            } else if let Err(e) = data.manager().start_realm(&realm) {
+                warn!("failed to restart realm {}: {}", realm.name(), e);
+            }
+        });
+        Ok(vec![m.msg.method_return()])
+    }
+
     fn do_terminal(m: &MethodInfo) -> MethodResult {
         let name = m.msg.read1()?;
         let data = m.tree.get_data().clone();
@@ -151,6 +181,17 @@ impl DbusServer {
                 warn!("error launching terminal for realm {}: {}", realm.name(), err);
             }
         });
+        Ok(vec![m.msg.method_return()])
+    }
+
+    fn do_update(m: &MethodInfo) -> MethodResult {
+        let name = m.msg.read1()?;
+        let data = m.tree.get_data().clone();
+        let realmfs = data.realmfs_by_name(name)?;
+
+        let command = format!("{} {} update {}", SUDO_PATH, UPDATE_TOOL_PATH, realmfs.name());
+        terminal::spawn_citadel_gnome_terminal(Some(command));
+
         Ok(vec![m.msg.method_return()])
     }
 
@@ -183,6 +224,17 @@ impl DbusServer {
         Ok(vec![msg])
     }
 
+    fn do_get_realm_config(m: &MethodInfo) -> MethodResult {
+        let name = m.msg.read1()?;
+        let data = m.tree.get_data().clone();
+        let config = data.realm_config(name)?;
+        Ok(vec![m.msg.method_return().append1(config)])
+    }
+
+    fn do_list_realmfs(m: &MethodInfo) -> MethodResult {
+        let list = m.tree.get_data().realmfs_list();
+        Ok(vec![m.msg.method_return().append1(list)])
+    }
 
     pub fn start(&self) -> Result<()> {
         let tree = self.build_tree();
@@ -350,21 +402,89 @@ impl TreeData {
         }
     }
 
-    fn realm_list(&self) -> HashMap<String, u8> {
+    fn realmfs_by_name(&self, name: &str) -> result::Result<RealmFS, MethodErr> {
+        if let Some(realmfs) = self.manager.realmfs_by_name(name) {
+            Ok(realmfs)
+        } else {
+            result::Result::Err(MethodErr::failed(&format!("Cannot find realmfs {}", name)))
+        }
+    }
+
+    fn append_config_flag(list: &mut Vec<(String,String)>, val: bool, name: &str) {
+        let valstr = if val { "true".to_string() } else { "false".to_string() };
+        list.push((name.to_string(), valstr));
+    }
+
+    fn realm_config(&self, name: &str) -> result::Result<Vec<(String,String)>, MethodErr> {
+        let realm = self.realm_by_name(name)?;
+        let config = realm.config();
+        let mut list = Vec::new();
+        Self::append_config_flag(&mut list, config.gpu(), "use-gpu");
+        Self::append_config_flag(&mut list, config.wayland(), "use-wayland");
+        Self::append_config_flag(&mut list, config.x11(), "use-x11");
+        Self::append_config_flag(&mut list, config.sound(), "use-sound");
+        Self::append_config_flag(&mut list, config.shared_dir(), "use-shared-dir");
+        Self::append_config_flag(&mut list, config.network(), "use-network");
+        Self::append_config_flag(&mut list, config.kvm(), "use-kvm");
+        Self::append_config_flag(&mut list, config.ephemeral_home(), "use-ephemeral-home");
+        let overlay = match config.overlay() {
+            OverlayType::None => "none",
+            OverlayType::TmpFS => "tmpfs",
+            OverlayType::Storage => "storage",
+        };
+        let scheme = match config.terminal_scheme() {
+            Some(name) => name.to_string(),
+            None => String::new(),
+        };
+
+        list.push(("realmfs".to_string(), config.realmfs().to_string()));
+        list.push(("overlay".to_string(), overlay.to_string()));
+        list.push(("terminal-scheme".to_string(), scheme));
+
+        Ok(list)
+    }
+
+    fn realm_element(realm: &Realm) -> (String, String, String, u8) {
+        let name = realm.name().to_owned();
+        let desc = Self::realm_description(realm);
+        let realmfs = realm.config().realmfs().to_owned();
+        let status = Self::realm_status(realm);
+        (name, desc, realmfs, status)
+    }
+
+    fn realm_list(&self) -> Vec<(String, String, String, u8)> {
         self.manager.realm_list()
             .iter()
-            .map(|r| (r.name().to_owned(), Self::realm_status(r) ))
+            .map(Self::realm_element)
             .collect()
     }
 
-    fn realm_status(realm: &Realm) -> u8 {
-        if realm.is_active() && realm.is_current() {
-            STATUS_REALM_RUNNING_CURRENT
-        } else if realm.is_active() {
-            STATUS_REALM_RUNNING_NOT_CURRENT
-        } else {
-            STATUS_REALM_NOT_RUNNING
+    fn realm_description(realm: &Realm) -> String {
+        match realm.notes() {
+            Some(s) => s,
+            None => String::new(),
         }
+    }
+
+    fn realm_status(realm: &Realm) -> u8 {
+        let mut status = 0;
+        if realm.is_active() {
+            status |= STATUS_REALM_RUNNING;
+        }
+        if realm.is_current() {
+            status |= STATUS_REALM_CURRENT;
+        }
+        if realm.is_system() {
+            status |= STATUS_REALM_SYSTEM_REALM;
+        }
+        status
+    }
+
+    fn realmfs_list(&self) -> Vec<String> {
+        self.manager.realmfs_list()
+            .into_iter()
+            .map(|fs| fs.name().to_owned())
+            .collect()
     }
 }
 impl fmt::Debug for TreeData {

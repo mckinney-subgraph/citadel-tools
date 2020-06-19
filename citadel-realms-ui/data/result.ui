@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+<requires lib="gtk+" version="3.24"/>
+<object class="GtkBox" id="item-entry">
+  <property name="spacing">25</property>
+  <style>
+    <class name="item-entry"/>
+  </style>
+
+  <child>
+    <object class="GtkImage" id="item-icon">
+      <property name="margin-left">20</property>
+    </object>
+    <packing>
+      <property name="fill">False</property>
+    </packing>
+  </child>
+
+  <child>
+    <object class="GtkBox">
+      <property name="orientation">vertical</property>
+      <property name="spacing">5</property>
+      <!--
+      <property name="margin-top">10</property>
+      <property name="margin-bottom">10</property>
+      -->
+
+      <child>
+        <object class="GtkLabel" id="item-name">
+              <!-- <property name="hexpand">True</property> -->
+            <property name="halign">start</property> 
+          <style>
+            <class name="item-name"/>
+          </style>
+        </object>
+        <packing>
+          <property name="expand">True</property>
+          <property name="fill">False</property>
+        </packing>
+      </child>
+
+      <child>
+        <object class="GtkLabel" id="item-description">
+          <property name="hexpand">True</property>
+          <property name="halign">start</property>
+          <property name="margin-bottom">10</property>
+          <style>
+            <class name="item-description"/>
+          </style>
+        </object>
+        <packing>
+          <property name="fill">False</property>
+        </packing>
+      </child>
+
+    </object>
+    <packing>
+      <property name="expand">True</property>
+      <property name="fill">True</property>
+    </packing>
+  </child>
+</object>
+</interface>
