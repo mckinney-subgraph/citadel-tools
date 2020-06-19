@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 pub struct NotesDialog {
     inner: ViewBox,
-    callback: Rc<Fn(&mut Cursive, &str)>,
+    callback: Rc<dyn Fn(&mut Cursive, &str)>,
 }
 
 impl NotesDialog {
@@ -62,7 +62,7 @@ impl NotesDialog {
 }
 
 impl ViewWrapper for NotesDialog {
-    type V = View;
+    type V = dyn View;
 
     fn with_view<F, R>(&self, f: F) -> Option<R>
         where F: FnOnce(&Self::V) -> R

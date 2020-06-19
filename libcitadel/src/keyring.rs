@@ -5,7 +5,7 @@ use std::fs;
 use std::ffi::CString;
 use std::os::raw::c_char;
 
-use libc::{self,c_long,c_ulong, c_int, int32_t};
+use libc::{self,c_long,c_ulong, c_int};
 
 use hex;
 use sodiumoxide::randombytes::randombytes_into;
@@ -176,7 +176,7 @@ const KEYCTL_READ                : c_int = 11;  // read a key or keyring's conte
 const KEY_SPEC_USER_KEYRING      : c_int = -4;  // - key ID for UID-specific keyring
 
 
-pub struct KernelKey(int32_t);
+pub struct KernelKey(i32);
 
 impl KernelKey {
 

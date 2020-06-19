@@ -53,7 +53,7 @@ pub trait LogOutput: Send {
 
 pub struct Logger {
     level: LogLevel,
-    output: Box<LogOutput>,
+    output: Box<dyn LogOutput>,
 }
 
 impl Logger {
@@ -62,7 +62,7 @@ impl Logger {
         logger.level = level;
     }
 
-    pub fn set_log_output(output: Box<LogOutput>) {
+    pub fn set_log_output(output: Box<dyn LogOutput>) {
         let mut logger = LOGGER.lock().unwrap();
         logger.output = output;
     }

@@ -35,10 +35,10 @@ use cursive::rect::Rect;
 //use cursive::rect::Rect;
 
 /// Callback taking an item index as input.
-type IndexCallback = Rc<Fn(&mut Cursive, usize)>;
+type IndexCallback = Rc<dyn Fn(&mut Cursive, usize)>;
 
 /// Callback taking as input the row ID, the collapsed state, and the child ID.
-type CollapseCallback = Rc<Fn(&mut Cursive, usize, bool, usize)>;
+type CollapseCallback = Rc<dyn Fn(&mut Cursive, usize, bool, usize)>;
 
 /// A low level tree view.
 ///

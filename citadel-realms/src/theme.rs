@@ -247,7 +247,7 @@ impl ThemeChooser {
 }
 
 impl ViewWrapper for ThemeChooser {
-    type V = View;
+    type V = dyn View;
     fn with_view<F: FnOnce(&Self::V) -> R, R>(&self, f: F) -> Option<R> { Some(f(&*self.inner)) }
     fn with_view_mut<F: FnOnce(&mut Self::V) -> R, R>(&mut self, f: F) -> Option<R> { Some(f(&mut *self.inner)) }
 

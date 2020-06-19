@@ -12,7 +12,7 @@ pub struct UtsName(libc::utsname);
 impl UtsName {
     pub fn uname() -> UtsName {
         unsafe {
-            let mut ret: UtsName = mem::uninitialized();
+            let mut ret: UtsName = mem::zeroed();
             libc::uname(&mut ret.0);
             ret
         }

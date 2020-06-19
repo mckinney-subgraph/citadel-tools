@@ -395,7 +395,7 @@ impl BootEntry {
 
     // Increment index value and rename boot entry file. Return false
     // if new name already exists.
-    fn rotate(&mut self) -> Result<(bool)> {
+    fn rotate(&mut self) -> Result<bool> {
         let old_path = self.path();
         let old_index = self.index;
         self.index = match self.index {

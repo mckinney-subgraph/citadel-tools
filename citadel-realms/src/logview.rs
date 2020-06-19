@@ -59,7 +59,7 @@ impl LogView {
 }
 
 impl ViewWrapper for LogView {
-    type V = View;
+    type V = dyn View;
 
     fn with_view<F, R>(&self, f: F) -> Option<R>
         where F: FnOnce(&Self::V) -> R

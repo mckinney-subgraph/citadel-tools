@@ -179,7 +179,7 @@ impl FieldDialogBuilder {
     }
 
     pub fn set_height(&mut self, height: usize) {
-        self.height = Some(height);;
+        self.height = Some(height);
     }
 
     pub fn height(mut self, height: usize) -> Self {
@@ -432,7 +432,7 @@ impl ValidatorResult {
 #[derive(Clone)]
 pub struct TextValidator {
     id: String,
-    is_valid: Rc<Box<Fn(&str) -> ValidatorResult>>,
+    is_valid: Rc<Box<dyn Fn(&str) -> ValidatorResult>>,
 }
 
 impl TextValidator {

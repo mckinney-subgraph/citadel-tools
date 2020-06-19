@@ -117,7 +117,7 @@ pub struct ItemList<T: Clone + 'static> {
     selector: Selector<T>,
     last_size: Vec2,
     info_state: Rc<ItemRenderState>,
-    content: Box<ItemListContent<T>>,
+    content: Box<dyn ItemListContent<T>>,
 }
 
 impl <T: Clone + 'static> ItemList<T> {

@@ -216,7 +216,7 @@ impl DialogButtonAdapter for NewRealmDialog {
 }
 
 impl ViewWrapper for NewRealmDialog {
-    type V = View;
+    type V = dyn View;
 
     fn with_view<F, R>(&self, f: F) -> Option<R>
         where F: FnOnce(&Self::V) -> R
@@ -392,7 +392,7 @@ impl NewRealmFSDialog {
 
 
 impl ViewWrapper for NewRealmFSDialog {
-    type V = View;
+    type V = dyn View;
 
     fn with_view<F, R>(&self, f: F) -> Option<R>
         where F: FnOnce(&Self::V) -> R

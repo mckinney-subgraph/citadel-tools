@@ -14,12 +14,12 @@ use crate::notes::NotesDialog;
 use cursive::views::Dialog;
 use crate::realmfs::RealmFSAction;
 
-type ActionCallback = Fn(&Realm)+Send+Sync;
+type ActionCallback = dyn Fn(&Realm)+Send+Sync;
 
 #[derive(Clone)]
 pub struct RealmAction {
     realm: Realm,
-    sink: Sender<Box<CbFunc>>,
+    sink: Sender<Box<dyn CbFunc>>,
     callback: Arc<ActionCallback>
 }
 

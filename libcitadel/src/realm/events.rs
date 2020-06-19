@@ -32,7 +32,7 @@ impl Display for RealmEvent {
     }
 }
 
-pub type RealmEventHandler = Fn(&RealmEvent)+Send+Sync;
+pub type RealmEventHandler = dyn Fn(&RealmEvent)+Send+Sync;
 
 pub struct RealmEventListener {
     inner: Arc<RwLock<Inner>>,

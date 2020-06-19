@@ -315,7 +315,7 @@ impl DialogButtonAdapter for ConfigDialog {
 }
 
 impl ViewWrapper for ConfigDialog {
-    type V = View;
+    type V = dyn View;
 
     fn with_view<F, R>(&self, f: F) -> Option<R>
         where F: FnOnce(&Self::V) -> R
@@ -412,7 +412,7 @@ struct RealmOptions {
 
 }
 
-type Accessor = 'static + (Fn(&mut RealmConfig) -> &mut Option<bool>);
+type Accessor = dyn 'static + (Fn(&mut RealmConfig) -> &mut Option<bool>);
 
 impl RealmOptions {
 
