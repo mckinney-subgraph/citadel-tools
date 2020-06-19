@@ -10,8 +10,8 @@ edition = "2018"
 libcitadel = { path = "../libcitadel" }
 libc = "0.2"
 failure = "0.1.1"
-termion = "1.5.1"
-signal-hook = "0.1.7"
+termion = "1.5"
+signal-hook = "0.1"
 
 [dependencies.cursive]
 version = "=0.11.0"
