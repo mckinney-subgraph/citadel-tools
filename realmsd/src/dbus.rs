@@ -1,10 +1,12 @@
+use std::fmt;
 use std::sync::Arc;
 use std::{result, thread};
 
 use dbus::tree::{self, Factory, MTFn, MethodResult, Tree, MethodErr};
-use dbus::{Connection, NameFlag, Message};
+use dbus::blocking::LocalConnection;
+use dbus::Message;
 use libcitadel::{Result, RealmManager, Realm, RealmEvent, OverlayType, RealmFS, terminal};
-use std::fmt;
+use std::time::Duration;
 
 type MethodInfo<'a> = tree::MethodInfo<'a, MTFn<TData>, TData>;
 
@@ -20,11 +22,8 @@ const OBJECT_PATH: &str = "/com/subgraph/realms";
 const INTERFACE_NAME: &str = "com.subgraph.realms.Manager";
 const BUS_NAME: &str = "com.subgraph.realms";
 
-const OBJECT_MANAGER_INTERFACE: &str = "org.freedesktop.DBus.ObjectManager";
-const VPN_CONNECTION_INTERFACE: &str = "org.freedesktop.VPN.Connection";
-
 pub struct DbusServer {
-    connection: Arc<Connection>,
+    connection: Arc<LocalConnection>,
     manager: Arc<RealmManager>,
     events: EventHandler,
 }
@@ -32,7 +31,9 @@ pub struct DbusServer {
 impl DbusServer {
 
     pub fn connect(manager: Arc<RealmManager>) -> Result<DbusServer> {
-        let connection = Arc::new(Connection::get_private(dbus::BusType::System)?);
+        let connection = LocalConnection::new_system()
+            .map_err(|e| format_err!("Failed to connect to DBUS system bus: {}", e))?;
+        let connection = Arc::new(connection);
         let events = EventHandler::new(connection.clone());
         let server = DbusServer { events, connection, manager };
         Ok(server)
@@ -122,8 +123,8 @@ impl DbusServer {
         let manager = m.tree.get_data().manager();
         let ret = m.msg.method_return();
         let msg = match manager.current_realm() {
-            Some(realm) => ret.append(realm.name()),
-            None => ret.append(""),
+            Some(realm) => ret.append1(realm.name()),
+            None => ret.append1(""),
         };
         Ok(vec![msg])
     }
@@ -218,8 +219,8 @@ impl DbusServer {
         let manager = m.tree.get_data().manager();
         let ret = m.msg.method_return();
         let msg = match manager.realm_by_pid(pid) {
-            Some(realm) => ret.append(realm.name()),
-            None => ret.append(""),
+            Some(realm) => ret.append1(realm.name()),
+            None => ret.append1(""),
         };
         Ok(vec![msg])
     }
@@ -238,12 +239,11 @@ impl DbusServer {
 
     pub fn start(&self) -> Result<()> {
         let tree = self.build_tree();
-        self.connection.register_name(BUS_NAME, NameFlag::ReplaceExisting as u32)?;
-        tree.set_registered(&self.connection, true)?;
-        self.connection.add_handler(tree);
+        if let Err(err) = self.connection.request_name(BUS_NAME, false, true, false) {
+            bail!("failed to register DBUS name {}: {}", BUS_NAME, err);
+        }
 
-        self.receive_signals_from(VPN_CONNECTION_INTERFACE)?;
-        self.receive_signals_from(OBJECT_MANAGER_INTERFACE)?;
+        tree.start_receive(self.connection.as_ref());
 
         self.manager.add_event_handler({
             let events = self.events.clone();
@@ -257,34 +257,23 @@ impl DbusServer {
         self.send_service_started();
 
         loop {
-            if let Some(msg) = self.connection.incoming(1000).next() {
-                self.process_message(msg)?;
-            }
+            self.connection
+                .process(Duration::from_millis(1000))
+                .map_err(context!("Error handling dbus messages"))?;
         }
-    }
-
-    fn process_message(&self, _msg: Message) -> Result<()> {
-        // add handlers for expected signals here
-        Ok(())
-    }
-
-    fn receive_signals_from(&self, interface: &str) -> Result<()> {
-        let rule = format!("type=signal,interface={}", interface);
-        self.connection.add_match(rule.as_str())?;
-        Ok(())
     }
 
     fn send_service_started(&self) {
         let signal = Self::create_signal("ServiceStarted");
-        if self.connection.send(signal).is_err() {
-            warn!("Failed to send ServiceStarted signal");
+        if self.connection.channel().send(signal).is_err() {
+            warn!("failed to send ServiceStarted signal");
         }
     }
 
     fn create_signal(name: &str) -> Message {
         let path = dbus::Path::new(OBJECT_PATH).unwrap();
-        let iface = dbus::Interface::new(INTERFACE_NAME).unwrap();
-        let member = dbus::Member::new(name).unwrap();
+        let iface = dbus::strings::Interface::new(INTERFACE_NAME).unwrap();
+        let member = dbus::strings::Member::new(name).unwrap();
         Message::signal(&path, &iface, &member)
     }
 
@@ -297,19 +286,20 @@ impl DbusServer {
 /// internally libdbus uses a mutex to control concurrent access
 /// to the dbus_connection_send() function.
 #[derive(Clone)]
-struct ConnectionSender(Arc<Connection>);
+struct ConnectionSender(Arc<LocalConnection>);
 
 unsafe impl Send for ConnectionSender {}
 unsafe impl Sync for ConnectionSender {}
 
 impl ConnectionSender {
-    fn new(connection: Arc<Connection>) -> Self {
+    fn new(connection: Arc<LocalConnection>) -> Self {
         ConnectionSender(connection)
     }
 
     fn send(&self, msg: Message) -> Result<()> {
-        self.0.send(msg)
-            .map_err(|()| failure::err_msg("failed to send message"))?;
+        if let Err(()) = self.0.channel().send(msg) {
+            bail!("failed to send DBUS message");
+        }
         Ok(())
     }
 }
@@ -320,7 +310,7 @@ struct EventHandler {
 }
 
 impl EventHandler {
-    fn new(conn: Arc<Connection>) -> EventHandler {
+    fn new(conn: Arc<LocalConnection>) -> EventHandler {
         EventHandler {
             sender: ConnectionSender::new(conn),
         }
@@ -358,8 +348,8 @@ impl EventHandler {
 
     fn create_realm_signal(name: &str) -> Message {
         let path = dbus::Path::new(OBJECT_PATH).unwrap();
-        let iface = dbus::Interface::new(INTERFACE_NAME).unwrap();
-        let member = dbus::Member::new(name).unwrap();
+        let iface = dbus::strings::Interface::new(INTERFACE_NAME).unwrap();
+        let member = dbus::strings::Member::new(name).unwrap();
         Message::signal(&path, &iface, &member)
     }
 

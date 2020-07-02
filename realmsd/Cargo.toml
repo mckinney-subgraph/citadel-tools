@@ -6,6 +6,5 @@ edition = "2018"
 
 [dependencies]
 libcitadel = { path = "../libcitadel" }
-failure = "0.1"
-dbus = "0.6"
+dbus = "0.8"
 
