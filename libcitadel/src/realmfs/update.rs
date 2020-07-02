@@ -5,7 +5,7 @@ use std::process::Command;
 
 use sodiumoxide::randombytes::randombytes;
 
-use crate::{Result, RealmFS, FileLock, ImageHeader, LoopDevice, ResizeSize, util};
+use crate::{Result, RealmFS, FileLock, ImageHeader, LoopDevice, ResizeSize, util, Error};
 use crate::realm::BridgeAllocator;
 use crate::util::is_euid_root;
 use crate::terminal::TerminalRestorer;
@@ -72,7 +72,7 @@ impl <'a> Update<'a> {
     fn create_update_copy(&self) -> Result<()> {
         if self.target.exists() {
             info!("Update file {} already exists, removing it", self.target.display());
-            fs::remove_file(&self.target)?;
+            util::remove_file(&self.target)?;
         }
         self.realmfs.copy_image_file(self.target())?;
 
@@ -108,9 +108,7 @@ impl <'a> Update<'a> {
             if self.resize.is_some() {
                 self.resize_device(loopdev)?;
             }
-            if !self.mountpath.exists() {
-                fs::create_dir_all(&self.mountpath)?;
-            }
+            util::create_dir(&self.mountpath)?;
             util::mount(loopdev.device_str(), &self.mountpath, Some("-orw,noatime"))?;
             Ok(())
         })
@@ -126,7 +124,6 @@ impl <'a> Update<'a> {
         if self.mountpath.exists() {
             if let Err(err) = util::umount(&self.mountpath) {
                 warn!("Failed to unmount directory {:?}: {}", self.mountpath, err);
-
             }
             if let Err(err) = fs::remove_dir(&self.mountpath) {
                 warn!("Failed to remove mountpoint directory {:?}: {}", self.mountpath, err);
@@ -165,9 +162,11 @@ impl <'a> Update<'a> {
         let len = (nblocks * BLOCK_SIZE) as u64;
         let f = fs::OpenOptions::new()
             .write(true)
-            .open(&self.target)?;
-        f.set_len(len)?;
-        Ok(())
+            .open(&self.target)
+            .map_err(context!("failed to open update image file {:?} to set length", self.target))?;
+
+        f.set_len(len)
+            .map_err(context!("failed setting length of update image file {:?} to {}", self.target, len))
     }
 
     // Remove dm-verity hash tree from update copy of image file.
@@ -229,8 +228,10 @@ impl <'a> Update<'a> {
         };
 
         let salt = hex::encode(randombytes(32));
-        let verity = Verity::new(&self.target)?;
-        let output = verity.generate_image_hashtree_with_salt(&salt, nblocks)?;
+        let verity = Verity::new(&self.target)
+            .map_err(context!("failed to create verity context for realmfs update image {:?}", self.target()))?;
+        let output = verity.generate_image_hashtree_with_salt(&salt, nblocks)
+            .map_err(context!("failed to generate dm-verity hashtree for realmfs update image {:?}", self.target()))?;
         // XXX passes metainfo for nblocks
         //let output = Verity::new(&self.target).generate_image_hashtree_with_salt(&self.realmfs.metainfo(), &salt)?;
         let root_hash = output.root_hash()
@@ -252,15 +253,21 @@ impl <'a> Update<'a> {
         let header = ImageHeader::new();
         header.set_flag(ImageHeader::FLAG_HASH_TREE);
         header.update_metainfo(&metainfo_bytes, sig.to_bytes(), &self.target)
+            .map_err(context!("failed to write header to update image {:?}", self.target()))?;
+        Ok(())
+
     }
 
 
     fn prompt_user(prompt: &str, default_y: bool) -> Result<bool> {
         let yn = if default_y { "(Y/n)" } else { "(y/N)" };
         print!("{} {} : ", prompt, yn);
-        io::stdout().flush()?;
+        io::stdout().flush()
+            .map_err(context!("failed to flush stdout"))?;
+
         let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
+        io::stdin().read_line(&mut line)
+            .map_err(context!("failed reading line from stdin"))?;
 
         let yes = match line.trim().chars().next() {
             Some(c) => c == 'Y' || c == 'y',
@@ -319,7 +326,7 @@ impl <'a> Update<'a> {
             .status()
             .map_err(|e| {
                 let _ = self.cleanup();
-                e
+                Error::with_error("failed to run systemd-nspawn", e)
             })?;
         Ok(())
     }
@@ -339,12 +346,13 @@ impl <'a> Update<'a> {
         for i in (1..NUM_BACKUPS).rev() {
             let from = backup(i - 1);
             if from.exists() {
-                fs::rename(from, backup(i))?;
+                let to = backup(i);
+                util::rename(&from, &to)?;
             }
         }
-        fs::rename(self.realmfs.path(), backup(0))?;
-        fs::rename(self.target(), self.realmfs.path())?;
-        Ok(())
+        let to = backup(0);
+        util::rename(self.realmfs.path(), &to)?;
+        util::rename(self.target(), self.realmfs.path())
     }
 }
 

@@ -1,8 +1,7 @@
 use std::fs;
 use std::path::{Path,PathBuf};
-use std::os::unix;
 
-use crate::Result;
+use crate::{Result, util};
 
 pub fn read(path: impl AsRef<Path>) -> Option<PathBuf> {
     let path = path.as_ref();
@@ -29,18 +28,12 @@ pub fn write(target: impl AsRef<Path>, link: impl AsRef<Path>, tmp_in_parent: bo
     let tmp = write_tmp_path(link, tmp_in_parent);
 
     if let Some(parent) = link.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
+        util::create_dir(parent)?;
     }
 
-    if tmp.exists() {
-        fs::remove_file(&tmp)?;
-    }
-
-    unix::fs::symlink(target, &tmp)?;
-    fs::rename(&tmp, link)?;
-    Ok(())
+    util::remove_file(&tmp)?;
+    util::symlink(target, &tmp)?;
+    util::rename(&tmp, link)
 }
 
 fn write_tmp_path(link: &Path, tmp_in_parent: bool) -> PathBuf {
@@ -60,7 +53,7 @@ fn write_tmp_path(link: &Path, tmp_in_parent: bool) -> PathBuf {
 pub fn remove(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
     if fs::symlink_metadata(path).is_ok() {
-        fs::remove_file(path)?;
+        util::remove_file(path)?;
     }
     Ok(())
 }

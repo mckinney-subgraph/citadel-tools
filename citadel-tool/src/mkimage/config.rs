@@ -1,10 +1,8 @@
-use std::fs::File;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use toml;
 
-use libcitadel::Result;
+use libcitadel::{Result, util};
 
 #[derive(Deserialize)]
 pub struct BuildConfig {
@@ -39,10 +37,7 @@ impl BuildConfig {
             path.push("mkimage.conf");
         }
 
-        let mut config = match BuildConfig::from_path(&path) {
-            Ok(config) => config,
-            Err(e) => bail!("Failed to load config file {}: {}", path.display(), e),
-        };
+        let mut config = BuildConfig::from_path(&path)?;
 
         path.pop();
         config.basedir = path;
@@ -55,10 +50,9 @@ impl BuildConfig {
     }
 
     fn from_path(path: &Path) -> Result<BuildConfig> {
-        let mut f = File::open(path)?;
-        let mut s = String::new();
-        f.read_to_string(&mut s)?;
-        let config = toml::from_str::<BuildConfig>(&s)?;
+        let s = util::read_to_string(path)?;
+        let config = toml::from_str::<BuildConfig>(&s)
+            .map_err(context!("Failed to parse build config file {:?}", path))?;
         config.validate()?;
         Ok(config)
     }

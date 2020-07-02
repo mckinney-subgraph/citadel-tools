@@ -13,7 +13,8 @@ pub struct IconCache {
 impl IconCache {
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let file = File::open(path.as_ref())?;
+        let path = path.as_ref();
+        let file = File::open(path).map_err(context!("failed to open {:?}", path))?;
         Ok(IconCache { file })
     }
 
@@ -46,7 +47,8 @@ impl IconCache {
         let mut output = String::new();
         let mut nread = 0;
         loop {
-            let n = self.file.read_at(&mut buf, (offset + nread)as u64 )?;
+            let n = self.file.read_at(&mut buf, (offset + nread)as u64 )
+                .map_err(context!("failed to read from icon cache at offset {}", (offset + nread)))?;
             if n == 0 {
                 return Ok(output);
             }
@@ -80,7 +82,8 @@ impl IconCache {
     fn read_exact_at(&self, buf: &mut [u8], offset: usize) -> Result<()> {
         let mut nread = 0;
         while nread < buf.len() {
-            let sz = self.file.read_at(&mut buf[nread..], (offset + nread) as u64)?;
+            let sz = self.file.read_at(&mut buf[nread..], (offset + nread) as u64)
+                .map_err(context!("failed to read from icon cache at offset {}", (offset + nread)))?;
             nread += sz;
             if sz == 0 {
                 bail!("bad offset");

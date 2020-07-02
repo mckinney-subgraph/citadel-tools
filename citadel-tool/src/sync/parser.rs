@@ -1,9 +1,7 @@
-use std::io::Read;
-use std::fs::File;
 use std::path::Path;
 use std::collections::HashSet;
 
-use libcitadel::Result;
+use libcitadel::{Result, util};
 use crate::sync::desktop_file::{DesktopFile,Line};
 
 lazy_static! {
@@ -36,11 +34,11 @@ fn is_whitelisted_key(key: &str) -> bool {
 fn filename_from_path(path: &Path) -> Result<&str> {
     let filename = match path.file_name() {
         Some(name) => name,
-        None => return Err(format_err!("Path {:?} has no filename component", path)),
+        None => bail!("Path {:?} has no filename component", path),
     };
     match filename.to_str() {
         Some(s) => Ok(s),
-        None => Err(format_err!("Filename has invalid utf8 encoding")),
+        None => bail!("Filename has invalid utf8 encoding"),
     }
 }
 pub struct DesktopFileParser {
@@ -66,14 +64,9 @@ impl DesktopFileParser {
     }
 
     pub fn parse_from_path<P: AsRef<Path>>(path: P, exec_prefix: &str) -> Result<DesktopFile> {
-        let filename = filename_from_path(path.as_ref())?;
-        let f = File::open(path.as_ref())?;
-        DesktopFileParser::parse_from_reader(f, filename, exec_prefix)
-    }
-
-    fn parse_from_reader<T: Read>(mut r: T, filename: &str, exec_prefix: &str) -> Result<DesktopFile> {
-        let mut buffer = String::new();
-        r.read_to_string(&mut buffer)?;
+        let path = path.as_ref();
+        let filename = filename_from_path(path)?;
+        let buffer = util::read_to_string(path)?;
         DesktopFileParser::parse_from_string(&buffer, filename, exec_prefix)
     }
 
@@ -82,7 +75,7 @@ impl DesktopFileParser {
         for s in body.lines() {
             match LineParser::parse(s) {
                 Some(line) => parser.process_line(line)?,
-                None => return Err(format_err!("Failed to parse line: '{}'", s))
+                None => bail!("failed to parse line: '{}'", s)
             }
         }
         Ok(parser.desktop_file)
@@ -92,7 +85,7 @@ impl DesktopFileParser {
         match line {
             Line::Comment(_) | Line::Empty => {},
             Line::DesktopHeader => self.seen_header = true,
-            _ => return Err(format_err!("Missing Desktop Entry header"))
+            _ => bail!("missing Desktop Entry header")
         }
         self.desktop_file.add_line(line);
         Ok(())
@@ -119,13 +112,13 @@ impl DesktopFileParser {
             Line::ExecLine(ref mut s) => {
                 s.insert_str(0,self.exec_prefix.as_str())
             },
-            Line::DesktopHeader => return Err(format_err!("Duplicate Desktop Entry header")),
+            Line::DesktopHeader => bail!("duplicate Desktop Entry header"),
             Line::ActionHeader(ref action) => {
                 if self.known_actions.contains(action) {
                     self.current_action = Some(action.to_string());
                     self.in_ignored_group = false;
                 } else {
-                    return Err(format_err!("Desktop Action header with undecleared action: {}", action))
+                    bail!("desktop Action header with undecleared action: {}", action)
                 }
             },
             Line::GroupHeader(_) => {

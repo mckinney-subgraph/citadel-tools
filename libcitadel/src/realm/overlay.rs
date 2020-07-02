@@ -1,8 +1,7 @@
 use std::fs;
-use std::os::unix;
 use std::path::{Path,PathBuf};
 
-use crate::{Realm,Result};
+use crate::{Realm, Result, util};
 use crate::Exec;
 use crate::realm::config::OverlayType;
 
@@ -68,7 +67,7 @@ impl RealmOverlay {
         }
 
         let lower = base.join("lower").read_link()
-            .map_err(|e| format_err!("Unable to read link to 'lower' directory of overlay: {}", e));
+            .map_err(context!("unable to read link to 'lower' directory of overlay"));
 
         match self.overlay {
             OverlayType::TmpFS => self.remove_tmpfs(&base)?,
@@ -93,14 +92,14 @@ impl RealmOverlay {
 
     fn remove_tmpfs(&self, base: &Path) -> Result<()> {
         fs::remove_dir_all(base)
-            .map_err(|e| format_err!("Could not remove overlay directory {}: {}", base.display(), e))
+            .map_err(context!("failed to remove overlay directory {:?}", base))
     }
 
     fn remove_btrfs(&self, base: &Path) -> Result<()> {
         Exec::new("/usr/bin/btrfs")
             .quiet()
             .run(format!("subvolume delete {}", base.display()))
-            .map_err(|e| format_err!("Could not remove btrfs subvolume {}: {}", base.display(), e))
+            .map_err(context!("failed to remove btrfs subvolume {:?}", base))
     }
 
     fn create_tmpfs(&self, lower: &Path) -> Result<PathBuf> {
@@ -139,7 +138,8 @@ impl RealmOverlay {
         let upper = self.mkdir(base, "upperdir")?;
         let work = self.mkdir(base, "workdir")?;
         let mountpoint = self.mkdir(base, "mountpoint")?;
-        unix::fs::symlink(lower, base.join("lower"))?;
+        let baselower = base.join("lower");
+        util::symlink(lower, &baselower)?;
         cmd!("/usr/bin/mount",
             "-t overlay realm-{}-overlay -olowerdir={},upperdir={},workdir={} {}",
             self.realm,
@@ -152,8 +152,7 @@ impl RealmOverlay {
 
     fn mkdir(&self, base: &Path, dirname: &str) -> Result<PathBuf> {
         let path = base.join(dirname);
-        fs::create_dir_all(&path)
-            .map_err(|e| format_err!("failed to create directory {}: {}", path.display(), e))?;
+        util::create_dir(&path)?;
         Ok(path)
     }
 

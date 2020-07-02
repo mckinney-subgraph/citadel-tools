@@ -1,4 +1,3 @@
-use std::fs;
 use std::fmt::{self,Write};
 use std::path::{Path,PathBuf};
 
@@ -48,7 +47,7 @@ impl KernelInstaller {
     pub fn install(&mut self) -> Result<PathBuf> {
         let install_path = self.install_kernel_path()?;
         info!("Copying kernel bzImage to {}", install_path.display());
-        fs::copy(&self.new_kernel.path, &install_path)?;
+        util::copy_file(&self.new_kernel.path, &install_path)?;
 
         self.boot_entries.rotate()?;
 
@@ -60,9 +59,6 @@ impl KernelInstaller {
             let mut e = self.boot_entries.0.pop().unwrap();
             e.remove()?;
         }
-
-
-
 
         // 0) if boot.conf does not exist, just write it. done.
         // 1) if current boot.conf is not verified, just replace it. done.
@@ -200,13 +196,12 @@ impl BootEntries {
         if !base_path.exists() {
             return Ok(())
         }
-        for dirent in fs::read_dir(base_path)? {
-            let dirent = dirent?;
-            if let Some(fname) = dirent.file_name().to_str() {
+        util::read_directory(base_path, |dent| {
+            if let Some(fname) = dent.file_name().to_str() {
                 self.load_filename(fname);
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn load_filename(&mut self, fname: &str) {
@@ -250,7 +245,7 @@ impl BootEntries {
     fn _rotate(&mut self) -> Result<()> {
         for entry in self.0.iter_mut().rev() {
             if !entry.rotate()? {
-                bail!("Failed to rotate boot entry {} because next index already exists", entry.path().display());
+                bail!("failed to rotate boot entry {} because next index already exists", entry.path().display());
             }
         }
         Ok(())
@@ -333,8 +328,7 @@ impl BootEntry {
         writeln!(&mut buffer, "title {}", self.title)?;
         writeln!(&mut buffer, "linux /{}", kernel)?;
         writeln!(&mut buffer, "options {}", self.options)?;
-        fs::write(self.path(), buffer)?;
-        Ok(())
+        util::write_file(self.path(), buffer)
     }
 
     fn is_good(&self) -> bool {
@@ -351,7 +345,7 @@ impl BootEntry {
 
     fn load(&mut self) -> Result<()> {
         let path = self.path();
-        for line in fs::read_to_string(&path)?.lines() {
+        for line in util::read_to_string(&path)?.lines() {
             if line.starts_with("title ") {
                 self.title = line.trim_start_matches("title ").to_owned();
             } else if line.starts_with("linux /") {
@@ -408,7 +402,7 @@ impl BootEntry {
             return Ok(false);
         }
         verbose!("Rotating boot entry {} to {}", old_path.display(), new_path.display());
-        fs::rename(old_path, new_path)?;
+        util::rename(old_path, new_path)?;
         Ok(true)
     }
 
@@ -418,7 +412,7 @@ impl BootEntry {
             bzimage.remove_file()?;
             self.bzimage = None;
         }
-        fs::remove_file(self.path())?;
+        util::remove_file(self.path())?;
         Ok(())
     }
 }
@@ -447,8 +441,7 @@ impl KernelBzImage {
     }
 
     fn remove_file(&self) -> Result<()> {
-        fs::remove_file(&self.path)?;
-        Ok(())
+        util::remove_file(&self.path)
     }
 }
 

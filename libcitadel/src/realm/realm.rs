@@ -187,11 +187,9 @@ impl Realm {
     /// to order the output when listing realms.
     pub fn update_timestamp(&self) -> Result<()> {
         let tstamp = self.base_path().join(".tstamp");
-        if tstamp.exists() {
-            fs::remove_file(&tstamp)?;
-        }
+        util::remove_file(&tstamp)?;
         fs::File::create(&tstamp)
-            .map_err(|e| format_err!("failed to create timestamp file {}: {}", tstamp.display(), e))?;
+            .map_err(context!("failed to create timestamp file {:?}", tstamp))?;
         // also load the new value
         self.inner_mut().timestamp = self.load_timestamp();
         Ok(())
@@ -309,7 +307,7 @@ impl Realm {
             // not exist, create it as a fork of 'base'
             base.fork(default)
         } else {
-            Err(format_err!("Default RealmFS '{}' does not exist and neither does 'base'", default))
+            bail!("Default RealmFS '{}' does not exist and neither does 'base'", default)
         }
     }
 
@@ -459,11 +457,10 @@ impl Realm {
         let path = self.base_path_file("notes");
         let notes = notes.as_ref();
         if path.exists() && notes.is_empty() {
-            fs::remove_file(path)?;
+            util::remove_file(&path)
         } else {
-            fs::write(path, notes)?;
+            util::write_file(&path, notes)
         }
-        Ok(())
     }
 }
 

@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -205,7 +204,7 @@ impl RealmManager {
         let home = realm.base_path_file("home");
         if !home.exists() {
             warn!("No home directory exists at {}, creating an empty directory", home.display());
-            fs::create_dir_all(&home)?;
+            util::create_dir(&home)?;
             util::chown_user(&home)?;
         }
 
@@ -226,10 +225,9 @@ impl RealmManager {
 
     fn create_realm_namefile(&self, realm: &Realm) -> Result<()> {
         let namefile = realm.run_path_file("realm-name");
-        fs::write(&namefile, realm.name())?;
+        util::write_file(&namefile, realm.name())?;
         self.systemd.machinectl_copy_to(realm, &namefile, "/run/realm-name")?;
-        fs::remove_file(&namefile)?;
-        Ok(())
+        util::remove_file(&namefile)
     }
 
     fn start_realm_dependencies(&self, realm: &Realm, starting: &mut HashSet<String>) -> Result<()> {
@@ -331,13 +329,14 @@ impl RealmManager {
 
         // ensure that /proc/pid/root/run and /proc/pid/root/run/realm-name
         // are not symlinks
-        let run_meta = run.symlink_metadata()?;
-        let name_meta = realm_name.symlink_metadata()?;
+        let run_meta = run.symlink_metadata()
+            .map_err(context!("failed reading symlink metadata {:?}", run))?;
+        let name_meta = realm_name.symlink_metadata()
+            .map_err(context!("failed reading symlink metadata {:?}", realm_name))?;
         if !run_meta.file_type().is_dir() || !name_meta.file_type().is_file() {
             bail!("invalid path");
         }
-        let bytes = fs::read(realm_name)?;
-        Ok(String::from_utf8(bytes)?)
+        util::read_to_string(&realm_name)
     }
 
     pub fn rescan_realms(&self) -> Result<(Vec<Realm>,Vec<Realm>)> {
@@ -381,7 +380,6 @@ impl RealmManager {
         }
         self.inner_mut().realmfs_set.remove(realmfs.name());
         info!("Removing RealmFS image file {}", realmfs.path().display());
-        fs::remove_file(realmfs.path())?;
-        Ok(())
+        util::remove_file(realmfs.path())
     }
 }

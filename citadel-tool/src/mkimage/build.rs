@@ -3,8 +3,7 @@ use std::fs::OpenOptions;
 use std::fs::{self,File};
 use std::io::{self,Write};
 
-use failure::ResultExt;
-use libcitadel::{Result,ImageHeader,devkeys};
+use libcitadel::{Result, ImageHeader, devkeys, util};
 
 use super::config::BuildConfig;
 use std::path::Path;
@@ -52,13 +51,13 @@ impl UpdateBuilder {
 
     pub fn build(&mut self) -> Result<()> {
         info!("Copying source file to {}", self.image_data.display());
-        fs::copy(self.config.source(), &self.image_data)?;
+        util::copy_file(self.config.source(), &self.image_data)?;
 
         self.pad_image()
-            .context("failed writing padding to image")?;
-        
+            .map_err(context!("failed writing padding to image"))?;
+
         self.generate_verity()
-            .context("failed generating dm-verity hash tree")?;
+            .map_err(context!("failed generating dm-verity hash tree"))?;
 
         self.calculate_shasum()?;
 
@@ -66,8 +65,7 @@ impl UpdateBuilder {
 
         self.compress_image()?;
 
-        self.write_final_image()
-            .context("failed to write final image file")?;
+        self.write_final_image()?;
 
         Ok(())
     }
@@ -77,10 +75,11 @@ impl UpdateBuilder {
     }
 
     fn pad_image(&mut self) -> Result<()> {
-        let meta = self.image().metadata()?;
+        let meta = self.image().metadata()
+            .map_err(context!("failed to read metadata from {:?}", self.image()))?;
         let len = meta.len() as usize;
         if len % 512 != 0 {
-            bail!("Image file size is not a multiple of sector size (512 bytes)");
+            bail!("image file size is not a multiple of sector size (512 bytes)");
         }
         let padlen = align(len, BLOCK_SIZE) - len;
 
@@ -89,8 +88,11 @@ impl UpdateBuilder {
             let zeros = vec![0u8; padlen];
             let mut file = OpenOptions::new()
                 .append(true)
-                .open(self.image())?;
-            file.write_all(&zeros)?;
+                .open(self.image())
+                .map_err(context!("failed to open file {:?}", self.image()))?;
+
+            file.write_all(&zeros)
+                .map_err(context!("error writing image file"))?;
         }
 
         let nblocks = (len + padlen) / 4096;
@@ -102,7 +104,7 @@ impl UpdateBuilder {
 
     fn calculate_shasum(&mut self) -> Result<()> {
         let output = cmd_with_output!("sha256sum", "{}", self.image().display())
-            .context(format!("failed to calculate sha256 on {}", self.image().display()))?;
+            .map_err(context!("failed to calculate sha256 on {:?}", self.image()))?;
         let v: Vec<&str> = output.split_whitespace().collect();
         let shasum = v[0].trim().to_owned();
         info!("Sha256 of image data is {}", shasum);
@@ -113,7 +115,7 @@ impl UpdateBuilder {
     fn prepend_empty_block(&mut self) -> Result<()> {
         let tmpfile = self.image().with_extension("tmp");
         cmd!("/bin/dd", "if={} of={} bs=4096 seek=1 conv=sparse", self.image().display(), tmpfile.display())?;
-        fs::rename(tmpfile, self.image())?;
+        util::rename(tmpfile, self.image())?;
         Ok(())
     }
 
@@ -124,8 +126,9 @@ impl UpdateBuilder {
         let verity = Verity::new(self.image())?;
         let output = verity.generate_initial_hashtree(&hashfile)?;
 
-        fs::write(outfile, output.output())
-            .context("failed to write veritysetup command output to a file")?;
+        if let Err(err) = fs::write(outfile, output.output()) {
+            bail!("Failed to write veritysetup command output to a file: {}", err);
+        }
 
         let root = match output.root_hash() {
             Some(s) => s.to_owned(),
@@ -148,10 +151,11 @@ impl UpdateBuilder {
     fn compress_image(&self) -> Result<()> {
         if self.config.compress() {
             info!("Compressing image data");
-            cmd!("xz", "-T0 {}", self.image().display())
-                .context(format!("failed to compress {}", self.image().display()))?;
+            if let Err(err) = cmd!("xz", "-T0 {}", self.image().display()) {
+                bail!("failed to compress {:?}: {}", self.image(), err);
+            }
             // Rename back to original image_data filename
-            fs::rename(self.image().with_extension("xz"), self.image())?;
+            util::rename(self.image().with_extension("xz"), self.image())?;
         }
         Ok(())
     }
@@ -161,14 +165,17 @@ impl UpdateBuilder {
         let target = self.config.workdir_path(self.target_filename());
 
         let mut out = File::create(&target)
-            .context(format!("could not open output file {}", target.display()))?;
+            .map_err(context!("could not open output file {:?}", target))?;
 
-        header.write_header(&out)?;
+        header.write_header(&out)
+            .map_err(context!("error writing header to {:?}", target))?;
 
         let mut data = File::open(&self.image())
-            .context(format!("could not open image data file {}", self.image().display()))?;
+            .map_err(context!("could not open image data file {:?}", self.image()))?;
+
         io::copy(&mut data, &mut out)
-            .context("error copying image data to output file")?;
+            .map_err(context!("error copying image data to output file"))?;
+
         Ok(())
     }
 
@@ -180,12 +187,12 @@ impl UpdateBuilder {
         }
 
         let metainfo = self.generate_metainfo();
-        fs::write(self.config.workdir_path("metainfo"), &metainfo)?;
+        util::write_file(self.config.workdir_path("metainfo"), &metainfo)?;
         hdr.set_metainfo_bytes(&metainfo)?;
 
         if self.config.channel() == "dev" {
             let sig = devkeys().sign(&metainfo);
-            hdr.set_signature(sig.to_bytes())?;
+            hdr.set_signature(sig.to_bytes());
         }
         Ok(hdr)
     }
@@ -195,7 +202,7 @@ impl UpdateBuilder {
         self._generate_metainfo().unwrap()
     }
 
-    fn _generate_metainfo(&self) -> Result<Vec<u8>> {
+    fn _generate_metainfo(&self) -> io::Result<Vec<u8>> {
         assert!(self.verity_salt.is_some() && self.verity_root.is_some(), 
                 "no verity-salt/verity-root in generate_metainfo()");
 

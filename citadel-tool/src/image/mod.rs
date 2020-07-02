@@ -3,8 +3,7 @@ use std::process::exit;
 
 use clap::{App,Arg,SubCommand,ArgMatches};
 use clap::AppSettings::*;
-use libcitadel::{Result,ResourceImage,Logger,LogLevel,format_error,Partition,KeyPair,ImageHeader};
-use std::fs;
+use libcitadel::{Result, ResourceImage, Logger, LogLevel, Partition, KeyPair, ImageHeader, util};
 use hex;
 
 pub fn main(args: Vec<String>) {
@@ -89,7 +88,7 @@ pub fn main(args: Vec<String>) {
     };
 
     if let Err(ref e) = result {
-        println!("Error: {}", format_error(e));
+        println!("Error: {}", e);
         exit(1);
     }
 }
@@ -252,8 +251,7 @@ fn install_image(arg_matches: &ArgMatches) -> Result<()> {
     if image_dest.exists() {
         rotate(&image_dest)?;
     }
-    fs::rename(source,image_dest)?;
-    Ok(())
+    util::rename(source, &image_dest)
 }
 
 fn rotate(path: &Path) -> Result<()> {
@@ -262,11 +260,8 @@ fn rotate(path: &Path) -> Result<()> {
     }
     let filename = path.file_name().unwrap();
     let dot_zero = path.with_file_name(format!("{}.0", filename.to_string_lossy()));
-    if dot_zero.exists() {
-        fs::remove_file(&dot_zero)?;
-    }
-    fs::rename(path, &dot_zero)?;
-    Ok(())
+    util::remove_file(&dot_zero)?;
+    util::rename(path, &dot_zero)
 }
 
 fn genkeys() -> Result<()> {
@@ -334,5 +329,5 @@ fn choose_install_partition(verbose: bool) -> Result<Partition> {
             return Ok(p.clone())
         }
     }
-    Err(format_err!("No suitable install partition found"))
+    bail!("No suitable install partition found")
 }

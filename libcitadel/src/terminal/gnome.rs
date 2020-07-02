@@ -78,7 +78,7 @@ pub fn spawn_citadel_gnome_terminal<S>(command: Option<S>)
 pub fn open_citadel_gnome_terminal<S: AsRef<str>>(command: Option<S>) -> Result<()>
 {
     let mut cmd = build_open_terminal_command(command);
-    let status = cmd.status()?;
+    let status = cmd.status().map_err(context!("error running gnome-terminal"))?;
     info!("Gnome terminal exited with: {}", status);
     Ok(())
 }

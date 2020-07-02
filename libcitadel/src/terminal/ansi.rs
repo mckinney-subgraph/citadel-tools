@@ -2,6 +2,7 @@
 use crate::Result;
 use crate::terminal::{RawTerminal, Color, Base16Scheme};
 use std::io::{self,Read,Write,Stdout};
+use std::string::FromUtf8Error;
 
 #[derive(Default)]
 pub struct AnsiControl(String);
@@ -125,10 +126,9 @@ impl AnsiControl {
         io::stdout().flush().unwrap();
     }
 
-    pub fn write_to<W: Write>(&self, mut writer: W) -> Result<()> {
-        writer.write_all(self.as_bytes())?;
-        writer.flush()?;
-        Ok(())
+    fn write_to<W: Write>(&self, mut writer: W) -> Result<()> {
+        writer.write_all(self.as_bytes()).map_err(context!("error writing to terminal"))?;
+        writer.flush().map_err(context!("error calling flush() on terminal"))
     }
 
 }
@@ -136,7 +136,6 @@ impl AnsiControl {
 pub struct AnsiTerminal {
     raw: RawTerminal<Stdout>,
 }
-
 
 impl AnsiTerminal {
     pub fn new() -> Result<Self> {
@@ -210,18 +209,24 @@ impl AnsiTerminal {
     }
 
     fn write_code(&mut self, sequence: AnsiControl) -> Result<()> {
+        self._write_code(sequence)
+            .map_err(context!("error writing ansi sequence to terminal"))
+    }
+
+    fn _write_code(&mut self, sequence: AnsiControl) -> io::Result<()> {
         self.raw.write_all(sequence.as_bytes())?;
-        self.raw.flush()?;
-        Ok(())
+        self.raw.flush()
     }
 
     fn read_response(&mut self) -> Result<String> {
         let stdin = io::stdin();
         let mut input = stdin.lock();
         let mut buffer = Vec::new();
-        input.read_to_end(&mut buffer)?;
-        let s = String::from_utf8(buffer)?;
-        Ok(s)
+        input.read_to_end(&mut buffer)
+            .map_err(context!("error reading terminal input"))?;
+
+        String::from_utf8(buffer)
+            .map_err(context!("terminal input is not correct utf-8"))
     }
 
     pub fn apply_base16(&mut self, base16: &Base16Scheme) -> Result<()> {
@@ -234,4 +239,10 @@ impl AnsiTerminal {
 
     }
 
+}
+
+impl From<FromUtf8Error> for crate::Error {
+    fn from(_: FromUtf8Error) -> Self {
+        format_err!("failed to convert string to UTF-8").into()
+    }
 }

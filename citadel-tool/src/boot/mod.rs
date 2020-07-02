@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::exit;
 
-use libcitadel::{Result,ResourceImage,CommandLine,format_error,KeyRing,LogLevel,Logger};
+use libcitadel::{Result, ResourceImage, CommandLine, KeyRing, LogLevel, Logger, util};
 use libcitadel::RealmManager;
 use crate::boot::disks::DiskPartition;
 use std::path::Path;
@@ -21,11 +21,11 @@ pub fn main(args: Vec<String>) {
         Some(s) if s == "rootfs" => do_rootfs(),
         Some(s) if s == "setup" => do_setup(),
         Some(s) if s == "start-realms" => do_start_realms(),
-        _ => Err(format_err!("Bad or missing argument")),
+        _ => Err(format_err!("Bad or missing argument").into()),
     };
 
     if let Err(ref e) = result {
-        warn!("Failed: {}", format_error(e));
+        warn!("Failed: {}", e);
         exit(1);
     }
 }
@@ -69,21 +69,21 @@ fn mount_overlay() -> Result<()> {
     info!("Creating rootfs overlay");
 
     info!("Moving /sysroot mount to /rootfs.ro");
-    fs::create_dir_all("/rootfs.ro")?;
+    util::create_dir("/rootfs.ro")?;
     cmd!("/usr/bin/mount", "--make-private /")?;
     cmd!("/usr/bin/mount", "--move /sysroot /rootfs.ro")?;
     info!("Mounting tmpfs on /rootfs.rw");
-    fs::create_dir_all("/rootfs.rw")?;
+    util::create_dir("/rootfs.rw")?;
     cmd!("/usr/bin/mount", "-t tmpfs -orw,noatime,mode=755 rootfs.rw /rootfs.rw")?;
     info!("Creating /rootfs.rw/work /rootfs.rw/upperdir");
-    fs::create_dir_all("/rootfs.rw/upperdir")?;
-    fs::create_dir_all("/rootfs.rw/work")?;
+    util::create_dir("/rootfs.rw/upperdir")?;
+    util::create_dir("/rootfs.rw/work")?;
     info!("Mounting overlay on /sysroot");
     cmd!("/usr/bin/mount", "-t overlay overlay -olowerdir=/rootfs.ro,upperdir=/rootfs.rw/upperdir,workdir=/rootfs.rw/work /sysroot")?;
 
     info!("Moving /rootfs.ro and /rootfs.rw to new root");
-    fs::create_dir_all("/sysroot/rootfs.ro")?;
-    fs::create_dir_all("/sysroot/rootfs.rw")?;
+    util::create_dir("/sysroot/rootfs.ro")?;
+    util::create_dir("/sysroot/rootfs.rw")?;
     cmd!("/usr/bin/mount", "--move /rootfs.ro /sysroot/rootfs.ro")?;
     cmd!("/usr/bin/mount", "--move /rootfs.rw /sysroot/rootfs.rw")?;
     Ok(())
@@ -134,7 +134,8 @@ const LOADER_EFI_VAR_PATH: &str =
 fn read_loader_dev_efi_var() -> Result<Option<String>> {
     let efi_var = Path::new(LOADER_EFI_VAR_PATH);
     if efi_var.exists() {
-        let s = fs::read(efi_var)?
+        let s = fs::read(efi_var)
+            .map_err(context!("could not read {:?}", efi_var))?
             .into_iter().skip(4)  // u32 'attribute'
             .filter(|b| *b != 0)  // string is utf16 ascii
             .map(|b| (b as char).to_ascii_lowercase())
@@ -150,8 +151,8 @@ pub fn write_automount_units(partition: &DiskPartition) -> Result<()> {
     let dev = partition.path().display().to_string();
     info!("Writing /boot automount units to /run/systemd/system for {}", dev);
     let mount_unit = BOOT_MOUNT_UNIT.replace("$PARTITION", &dev);
-    fs::write("/run/systemd/system/boot.mount", mount_unit)?;
-    fs::write("/run/systemd/system/boot.automount", BOOT_AUTOMOUNT_UNIT)?;
+    util::write_file("/run/systemd/system/boot.mount", &mount_unit)?;
+    util::write_file("/run/systemd/system/boot.automount", BOOT_AUTOMOUNT_UNIT)?;
     info!("Starting /boot automount service");
     cmd!("/usr/bin/systemctl", "start boot.automount")?;
     Ok(())

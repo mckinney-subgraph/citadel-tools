@@ -39,7 +39,7 @@ impl LoopDevice {
         let result = f(&loopdev);
         let detach_result = loopdev.detach();
         let r = result?;
-        detach_result.map_err(|e| format_err!("error detaching loop device: {}", e))?;
+        detach_result.map_err(context!("error detaching loop device"))?;
         Ok(r)
     }
 
@@ -108,8 +108,7 @@ impl LoopDevice {
         //    mount --bind olddir newdir
         //    mount -o remount,bind,ro olddir newdir
         cmd!(Self::MOUNT, "--bind {} {}", rw.display(), ro.display())?;
-        cmd!(Self::MOUNT, "-o remount,bind,ro {} {}", rw.display(), ro.display())?;
-        Ok(())
+        cmd!(Self::MOUNT, "-o remount,bind,ro {} {}", rw.display(), ro.display())
     }
 }
 

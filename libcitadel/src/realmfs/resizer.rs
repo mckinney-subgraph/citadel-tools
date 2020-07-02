@@ -80,10 +80,14 @@ impl Superblock {
     }
 
     pub fn load(path: impl AsRef<Path>, offset: u64) -> Result<Self> {
+        let path = path.as_ref();
         let mut sb = Self::new();
-        let mut file = File::open(path.as_ref())?;
-        file.seek(SeekFrom::Start(1024 + offset))?;
-        file.read_exact(&mut sb.0)?;
+        let mut file = File::open(path)
+            .map_err(context!("failed to open image file {:?}", path))?;
+        file.seek(SeekFrom::Start(1024 + offset))
+            .map_err(context!("failed to seek to offset {} of image file {:?}", 1024 + offset, path))?;
+        file.read_exact(&mut sb.0)
+            .map_err(context!("error reading superblock from image file {:?}", path))?;
         Ok(sb)
     }
 

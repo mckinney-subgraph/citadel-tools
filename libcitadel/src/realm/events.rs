@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self,JoinHandle};
 use std::path;
 
-use crate::{RealmManager, Result, Realm};
+use crate::{RealmManager, Result, Realm, util};
 use super::realms::HasCurrentChanged;
 use dbus::{Connection, BusType, ConnectionItem, Message, Path};
 use inotify::{Inotify, WatchMask, WatchDescriptor, Event};
@@ -212,8 +212,10 @@ impl DbusEventListener {
     }
 
     fn dbus_event_loop(&self) -> Result<()> {
-        let connection = Connection::get_private(BusType::System)?;
-        connection.add_match("interface='org.freedesktop.machine1.Manager',type='signal'")?;
+        let connection = Connection::get_private(BusType::System)
+            .map_err(|e| format_err!("Failed to connect to DBUS system bus: {}", e))?;
+        connection.add_match("interface='org.freedesktop.machine1.Manager',type='signal'")
+            .map_err(|e| format_err!("DBUS error adding match rule: {}", e))?;
         for item in connection.iter(1000) {
             if self.inner().quit_flag() {
                 break;
@@ -244,7 +246,8 @@ impl DbusEventListener {
 
         let member = message.member()
             .ok_or_else(|| format_err!("invalid signal"))?;
-        let (name, _path): (String, Path) = message.read2()?;
+        let (name, _path): (String, Path) = message.read2()
+            .map_err(|e| format_err!("Failed to read dbus signal: {}", e))?;
         if let (Some(interface),Some(member)) = (message.interface(),message.member()) {
             verbose!("DBUS: {}:[{}({})]", interface, member,name);
         }
@@ -286,18 +289,21 @@ struct InotifyEventListener {
 impl InotifyEventListener {
 
     fn create(inner: Arc<RwLock<Inner>>) -> Result<Self> {
-        let mut inotify = Inotify::init()?;
-        let realms_watch = inotify.add_watch("/realms", WatchMask::MOVED_FROM|WatchMask::MOVED_TO)?;
-        let current_watch = inotify.add_watch("/run/citadel/realms/current", WatchMask::CREATE|WatchMask::MOVED_TO)?;
+        let mut inotify = Inotify::init()
+            .map_err(context!("inotify initialization failed"))?;
+        let realms_watch = inotify.add_watch("/realms", WatchMask::MOVED_FROM|WatchMask::MOVED_TO)
+            .map_err(context!("error adding watch for /realms to inotify"))?;
+        let current_watch = inotify.add_watch("/run/citadel/realms/current", WatchMask::CREATE|WatchMask::MOVED_TO)
+            .map_err(context!("error adding watch for /run/citadel/realms/current to inotify"))?;
 
         Ok(InotifyEventListener { inner, inotify, realms_watch, current_watch, })
     }
 
     fn wake_inotify() -> Result<()> {
         let path = "/run/citadel/realms/current/stop-events";
-        fs::File::create(path)?;
-        fs::remove_file(path)?;
-        Ok(())
+        fs::File::create(path)
+            .map_err(context!("error creating {}", path))?;
+        util::remove_file(path)
     }
 
     fn spawn(mut self) -> JoinHandle<Result<()>> {
@@ -307,7 +313,8 @@ impl InotifyEventListener {
     fn inotify_event_loop(&mut self) -> Result<()> {
         let mut buffer = [0; 1024];
         while !self.inner().quit_flag() {
-            let events = self.inotify.read_events_blocking(&mut buffer)?;
+            let events = self.inotify.read_events_blocking(&mut buffer)
+                .map_err(context!("error reading inotify events"))?;
 
             if !self.inner().quit_flag() {
                 for event in events {

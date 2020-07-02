@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path,PathBuf};
 use std::fs;
-
-use crate::{Realm, Result, symlink, RealmManager,FileLock};
 use std::sync::{Arc, Weak};
+
+use crate::{Realm, Result, symlink, RealmManager, FileLock, util};
 use super::create::RealmCreateDestroy;
 use crate::realm::systemd::Systemd;
 
@@ -88,12 +88,13 @@ impl Realms {
 
     fn all_realms(mark_active: bool) -> Result<Vec<Realm>> {
         let mut v = Vec::new();
-        for entry in fs::read_dir(Realms::BASE_PATH)? {
-            let entry = entry?;
-            if let Some(realm) = Realms::entry_to_realm(&entry) {
+        util::read_directory(Realms::BASE_PATH, |dent| {
+            if let Some(realm) = Realms::entry_to_realm(dent) {
                 v.push(realm);
             }
-        }
+            Ok(())
+        })?;
+
         if mark_active {
             Realms::mark_active_realms(&mut v)?;
         }

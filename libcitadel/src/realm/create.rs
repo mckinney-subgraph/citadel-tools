@@ -49,26 +49,22 @@ impl RealmCreateDestroy {
 
     fn create_realm_directory(&self) -> Result<()> {
         self.create_home()?;
-        self.move_from_temp()?;
-        Ok(())
+        self.move_from_temp()
     }
 
     fn create_home(&self) -> Result<()> {
         let home = self.temp_basepath().join("home");
 
-        fs::create_dir_all(&home)
-            .map_err(|e| format_err!("failed to create directory {}: {}", home.display(), e))?;
-        util::chown(&home, 1000, 1000)
-            .map_err(|e| format_err!("failed to change ownership of {} to 1000:1000: {}", home.display(), e))?;
+        util::create_dir(&home)?;
+        util::chown(&home, 1000, 1000)?;
 
         let skel = Path::new(Realms::BASE_PATH).join("skel");
 
         if skel.exists() {
             info!("Populating realm home directory with files from {}", skel.display());
             util::copy_tree(&skel, &home)
-                .map_err(|e| format_err!("failed to copy tree of files from {} to {}: {}", skel.display(), home.display(), e))?;
+                .map_err(context!("failed to copy tree of files from {:?} to {:?}", skel, home))?;
         }
-
         Ok(())
     }
 
@@ -78,8 +74,7 @@ impl RealmCreateDestroy {
         if to.exists() {
             bail!("Cannot move temporary directory {} to {} because the target already exists", from.display(), to.display());
         }
-        fs::rename(from, to)?;
-        Ok(())
+        util::rename(&from, &to)
     }
 
     fn move_to_temp(&self) -> Result<()> {
@@ -89,14 +84,9 @@ impl RealmCreateDestroy {
             bail!("Cannot move realm directory {} to {} because the target already exists", from.display(), to.display());
         }
 
-        if !Self::tmpdir().exists() {
-            fs::create_dir_all(Self::tmpdir())?;
-        }
-
-        fs::rename(from, to)?;
-
-        Ok(())
-
+        let tmpdir = Self::tmpdir();
+        util::create_dir(&tmpdir)?;
+        util::rename(&from, &to)
     }
 
     pub fn delete_realm(&self, save_home: bool) -> Result<()> {
@@ -106,22 +96,19 @@ impl RealmCreateDestroy {
             self.save_home_for_delete()?;
         }
 
-        info!("removing realm directory {}", self.temp_basepath().display());
-        fs::remove_dir_all(self.temp_basepath())?;
-        Ok(())
-
+        let realmdir = self.temp_basepath();
+        info!("removing realm directory {:?}", realmdir);
+        fs::remove_dir_all(&realmdir)
+            .map_err(context!("error removing realm directory {:?}", realmdir))
     }
 
     fn save_home_for_delete(&self) -> Result<()> {
-        if !Path::new("/realms/removed").exists() {
-            fs::create_dir("/realms/removed")?;
-        }
+        util::create_dir("/realms/removed")?;
 
         let target = self.home_save_directory();
         let home = self.temp_basepath().join("home");
-        fs::rename(&home, &target)
-            .map_err(|e| format_err!("unable to move realm home directory to {}: {}", target.display(), e))?;
 
+        util::rename(&home, &target)?;
         info!("home directory been moved to {}, delete it at your leisure", target.display());
         Ok(())
     }

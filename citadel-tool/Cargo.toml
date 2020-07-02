@@ -6,7 +6,6 @@ edition = "2018"
 
 [dependencies]
 libcitadel = { path = "../libcitadel" }
-failure = "0.1"
 rpassword = "4.0"
 clap = "2.33"
 lazy_static = "1.4"

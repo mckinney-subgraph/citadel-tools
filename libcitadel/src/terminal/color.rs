@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::Result;
+use crate::{Result, Error};
 use crate::terminal::AnsiTerminal;
 
 #[derive(Copy,Clone,Default,Debug)]
@@ -21,7 +21,7 @@ impl Color {
                 return Ok(Color(r, g, b))
             }
         }
-        Err(format_err!("Cannot parse '{}'", s))
+        bail!("Cannot parse '{}'", s)
     }
 
     pub fn rgb(self) -> (u16,u16,u16) {
@@ -92,4 +92,10 @@ impl TerminalPalette {
         Ok(())
     }
 
+}
+
+impl From<std::num::ParseIntError> for crate::Error {
+    fn from(_: std::num::ParseIntError) -> Self {
+        Error::message("failed to parse integer")
+    }
 }

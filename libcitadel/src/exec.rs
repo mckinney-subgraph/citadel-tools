@@ -50,10 +50,11 @@ impl Exec {
         let args: Vec<&str> = args.as_ref().split_whitespace().collect();
         let result = self.cmd
             .args(args)
-            .output()?;
+            .output()
+            .map_err(context!("failed to execute command {}", self.cmd_name))?;
 
         for line in BufReader::new(result.stderr.as_slice()).lines() {
-            verbose!("  {}", line?);
+            verbose!("  {}", line.unwrap());
         }
         self.check_cmd_status(result.status)
     }
@@ -64,7 +65,8 @@ impl Exec {
         let args: Vec<&str> = args.as_ref().split_whitespace().collect();
         let status = self.cmd
             .args(args)
-            .status()?;
+            .status()
+            .map_err(context!("failed to execute command {}", self.cmd_name))?;
 
         Ok(status.success())
     }
@@ -72,7 +74,9 @@ impl Exec {
     pub fn output(&mut self, args: impl AsRef<str>) -> Result<String> {
         self.ensure_command_exists()?;
         self.add_args(args.as_ref());
-        let result = self.cmd.stderr(Stdio::inherit()).output()?;
+        let result = self.cmd.stderr(Stdio::inherit())
+            .output()
+            .map_err(context!("failed to execute command {}", self.cmd_name))?;
         self.check_cmd_status(result.status)?;
         Ok(String::from_utf8(result.stdout).unwrap().trim().to_owned())
     }
@@ -90,11 +94,14 @@ impl Exec {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
-            .spawn()?;
+            .spawn()
+            .map_err(context!("failed to execute command {}", self.cmd_name))?;
 
         let stdin = child.stdin.as_mut().unwrap();
-        io::copy(&mut r, stdin)?;
-        let output = child.wait_with_output()?;
+        io::copy(&mut r, stdin)
+            .map_err(context!("error writing to stdin of command {}", self.cmd_name))?;
+        let output = child.wait_with_output()
+            .map_err(context!("error waiting for child command {} to exit", self.cmd_name))?;
         Ok(String::from_utf8(output.stdout).unwrap().trim().to_owned())
     }
 
@@ -121,18 +128,18 @@ impl Exec {
         } else if path.exists() {
             return Ok(())
         }
-        Err(format_err!("Cannot execute '{}': command does not exist", self.cmd_name))
+        bail!("cannot execute '{}': command does not exist", self.cmd_name)
     }
 
     fn search_path(filename: &str) -> Result<PathBuf> {
-        let path_var = env::var("PATH")?;
+        let path_var = env::var("PATH").unwrap_or(String::new());
         for mut path in env::split_paths(&path_var) {
             path.push(filename);
             if path.exists() {
                 return Ok(path);
             }
         }
-        Err(format_err!("Could not find {} in $PATH", filename))
+        bail!("could not find {} in $PATH", filename)
     }
 }
 
@@ -144,14 +151,16 @@ pub enum FileRange {
 
 
 fn ranged_reader<P: AsRef<Path>>(path: P, range: FileRange) -> Result<Box<dyn Read>> {
-    let mut f = File::open(path.as_ref())?;
+    let mut f = File::open(path.as_ref())
+        .map_err(context!("failed to open input file {:?}", path.as_ref()))?;
     let offset = match range {
         FileRange::All => 0,
         FileRange::Offset(n) => n,
         FileRange::Range {offset, ..} => offset,
     };
     if offset > 0 {
-        f.seek(SeekFrom::Start(offset as u64))?;
+        f.seek(SeekFrom::Start(offset as u64))
+            .map_err(context!("failed to seek to offset {} of input file {:?}", offset, path.as_ref()))?;
     }
     let r = BufReader::new(f);
     if let FileRange::Range {len, ..} = range {

@@ -13,7 +13,7 @@ pub fn run_cli_install() -> Result<bool> {
 
     display_disk(&disk);
 
-    let passphrase = match read_passphrase()? {
+    let passphrase = match read_passphrase().map_err(context!("error reading passphrase"))? {
         Some(passphrase) => passphrase,
         None => return Ok(false),
     };
@@ -29,7 +29,7 @@ pub fn run_cli_install_with<P: AsRef<Path>>(target: P) -> Result<bool> {
     let disk = find_disk_by_path(target.as_ref())?;
     display_disk(&disk);
 
-    let passphrase = match read_passphrase()? {
+    let passphrase = match read_passphrase().map_err(context!("error reading passphrase"))? {
         Some(passphrase) => passphrase,
         None => return Ok(false),
     };
@@ -66,17 +66,17 @@ fn find_disk_by_path(path: &Path) -> Result<Disk> {
             return Ok(disk.clone());
         }
     }
-    Err(format_err!("Installation target {} is not a valid disk", path.display()))
+    bail!("installation target {} is not a valid disk", path.display())
 }
 
 fn choose_disk() -> Result<Option<Disk>> {
     let disks = Disk::probe_all()?;
     if disks.is_empty() {
-        bail!("No disks found.");
+        bail!("no disks found.");
     }
 
     loop {
-        prompt_choose_disk(&disks)?;
+        prompt_choose_disk(&disks);
         let line = read_line()?;
         if line == "q" || line == "Q" {
             return Ok(None);
@@ -89,26 +89,26 @@ fn choose_disk() -> Result<Option<Disk>> {
     }
 }
 
-fn prompt_choose_disk(disks: &[Disk]) -> Result<()> {
+fn prompt_choose_disk(disks: &[Disk]) {
     println!("Available disks:\n");
     for (idx,disk) in disks.iter().enumerate() {
         println!("  [{}]: {} Size: {} Model: {}", idx + 1, disk.path().display(), disk.size_str(), disk.model());
     }
     print!("\nChoose a disk to install to (q to quit): ");
-    io::stdout().flush()?;
-    Ok(())
+    let _ = io::stdout().flush();
 }
 
 fn read_line() -> Result<String> {
     let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    io::stdin().read_line(&mut input)
+        .map_err(context!("error reading line from stdin"))?;
     if input.ends_with('\n') {
         input.pop();
     }
     Ok(input)
 }
 
-fn read_passphrase() -> Result<Option<String>> {
+fn read_passphrase() -> io::Result<Option<String>> {
     loop {
         println!("Enter a disk encryption passphrase (or 'q' to quit)");
         println!();
@@ -141,7 +141,7 @@ fn confirm_install(disk: &Disk) -> Result<bool> {
     println!("   Model: {}", disk.model());
     println!();
     print!("Type YES (uppercase) to continue with install: ");
-    io::stdout().flush()?;
+    let _ = io::stdout().flush();
     let answer = read_line()?;
     Ok(answer == "YES")
 }

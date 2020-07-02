@@ -21,7 +21,7 @@ use sodiumoxide::crypto::{
     },
 };
 
-use crate::{Result,Error,KeyPair};
+use crate::{Result, Error, KeyPair};
 
 #[derive(Serialize,Deserialize,Debug)]
 pub struct KeyRing {
@@ -38,9 +38,10 @@ impl KeyRing {
 
     pub fn load<P: AsRef<Path>>(path: P, passphrase: &str) -> Result<Self> {
         let mut sbox = SecretBox::new(path.as_ref());
-        sbox.read().map_err(|e| format_err!("Error reading keyring file: {}", e))?;
+        sbox.read().map_err(context!("error reading keyring file"))?;
         let mut bytes = sbox.open(passphrase)?;
-        let keyring = toml::from_slice::<KeyRing>(&bytes)?;
+        let keyring = toml::from_slice::<KeyRing>(&bytes)
+            .map_err(context!("failed to parse keyring file {:?}", path.as_ref()))?;
         bytes.iter_mut().for_each(|b| *b = 0);
         Ok(keyring)
     }
@@ -73,13 +74,13 @@ impl KeyRing {
             info!("Found {} key with request_key", name);
             return Ok(key);
         }
-        Err(format_err!("kernel key '{}' not found", name))
+        bail!("kernel key '{}' not found", name)
     }
 
     pub fn add_keys_to_kernel(&self) -> Result<()> {
         for (k,v) in self.keypairs.iter() {
             info!("Adding {} to kernel keystore", k.as_str());
-            let bytes = hex::decode(v)?;
+            let bytes = hex::decode(v).map_err(|_| format_err!("failed to hex decode ({})", v))?;
             let key = KernelKey::add_key("user", k.as_str(), &bytes, KEY_SPEC_USER_KEYRING)?;
             key.set_perm(0x3f03_0000)?;
         }
@@ -96,12 +97,18 @@ impl KeyRing {
         let salt = pwhash::gen_salt();
         let nonce = secretbox::gen_nonce();
         let key = SecretBox::passphrase_to_key(passphrase, &salt)?;
-        let bytes = toml::to_vec(self)?;
+        let bytes = toml::to_vec(self)
+            .map_err(context!("failed to serialize keyring"))?;
         let ciphertext = secretbox::seal(&bytes, &nonce, &key);
 
-        let mut file = fs::File::create(path.as_ref())?;
-        file.write_all(&salt.0)?;
-        file.write_all(&nonce.0)?;
+        Self::write_keyring(path.as_ref(), &salt.0, &nonce.0, &ciphertext)
+            .map_err(context!("error writing keyring file {:?}", path.as_ref()))
+    }
+
+    fn write_keyring(path: &Path, salt: &[u8], nonce: &[u8], ciphertext: &[u8]) -> io::Result<()> {
+        let mut file = fs::File::create(path)?;
+        file.write_all(&salt)?;
+        file.write_all(&nonce)?;
         file.write_all(&ciphertext)?;
         Ok(())
     }
@@ -143,6 +150,12 @@ impl SecretBox {
         if !self.data.is_empty() {
             self.data.clear();
         }
+
+        self.read_keyring_file()
+            .map_err(context!("error reading keyring file {:?}", self.path))
+    }
+
+    fn read_keyring_file(&mut self) -> io::Result<()> {
         let mut file = fs::File::open(&self.path)?;
         file.read_exact(&mut self.salt.0)?;
         file.read_exact(&mut self.nonce.0)?;
@@ -153,14 +166,14 @@ impl SecretBox {
     fn open(&self, passphrase: &str) -> Result<Vec<u8>> {
         let key = Self::passphrase_to_key(passphrase, &self.salt)?;
         let result = secretbox::open(&self.data, &self.nonce, &key)
-            .map_err(|_| format_err!("Failed to decrypt {}", self.path.display()))?;
+            .map_err(|_| format_err!("failed to decrypt {:?}", self.path))?;
         Ok(result)
     }
 
     fn passphrase_to_key(passphrase: &str, salt: &Salt) -> Result<secretbox::Key> {
         let mut keybuf = [0; secretbox::KEYBYTES];
         pwhash::derive_key(&mut keybuf, passphrase.as_bytes(), salt, pwhash::OPSLIMIT_INTERACTIVE, pwhash::MEMLIMIT_INTERACTIVE)
-            .map_err(|_| format_err!("Failed to derive key"))?;
+            .map_err(|_| format_err!("failed to derive key"))?;
         Ok(secretbox::Key(keybuf))
     }
 
@@ -212,7 +225,7 @@ impl KernelKey {
         let mut size = 0;
         loop {
             size = match self.buffer_request(KEYCTL_DESCRIBE, size) {
-                BufferResult::Err(err) => return Err(format_err!("Error calling KEYCTL_DESCRIBE on key: {}", err)),
+                BufferResult::Err(err) => bail!("error calling KEYCTL_DESCRIBE on key: {}", err),
                 BufferResult::Ok(vec) => return Ok(String::from_utf8(vec).expect("KEYCTL_DESCRIBE returned bad utf8")),
                 BufferResult::TooSmall(sz) => sz,
             }
@@ -231,7 +244,7 @@ impl KernelKey {
         let mut size = 0;
         loop {
             size = match self.buffer_request(KEYCTL_READ, size) {
-                BufferResult::Err(err) => return Err(format_err!("Error reading key: {}", err)),
+                BufferResult::Err(err) => bail!("Error reading key: {}", err),
                 BufferResult::Ok(buffer) => return Ok(buffer),
                 BufferResult::TooSmall(sz) => sz + 1,
             }
@@ -242,14 +255,14 @@ impl KernelKey {
         if size == 0 {
             return match keyctl1(command, self.id()) {
                 Err(err) => BufferResult::Err(err),
-                Ok(n) if n < 0 =>  BufferResult::Err(format_err!("keyctl returned bad size")),
+                Ok(n) if n < 0 =>  BufferResult::Err(format_err!("keyctl returned bad size").into()),
                 Ok(n) => BufferResult::TooSmall(n as usize),
             };
         }
         let mut buffer = vec![0u8; size];
         match keyctl3(command, self.id(), buffer.as_ptr() as u64, buffer.len() as u64) {
             Err(err) => BufferResult::Err(err),
-            Ok(n) if n < 0 => BufferResult::Err(format_err!("keyctrl returned bad size {}", n)),
+            Ok(n) if n < 0 => BufferResult::Err(format_err!("keyctrl returned bad size {}", n).into()),
             Ok(sz) if size >= (sz as usize) => {
                 let sz = sz as usize;
                 if size > sz  {
@@ -294,7 +307,7 @@ fn sys_keyctl(command: c_int, arg2: c_ulong, arg3: c_ulong, arg4: c_ulong, arg5:
     unsafe {
         let r = libc::syscall(libc::SYS_keyctl, command, arg2, arg3, arg4, arg5);
         if r == -1 {
-            Err(io::Error::last_os_error().into())
+            bail!("error calling sys_keyctl(): {}", io::Error::last_os_error());
         } else {
             Ok(r)
         }
@@ -305,7 +318,7 @@ fn _request_key(key_type: *const c_char, description: *const c_char) -> Result<c
     unsafe {
         let r = libc::syscall(libc::SYS_request_key, key_type, description, 0, 0);
         if r == -1 {
-            Err(io::Error::last_os_error().into())
+            bail!("error calling sys_request_key(): {}", io::Error::last_os_error());
         } else {
             Ok(r)
         }
@@ -316,7 +329,7 @@ fn _add_key(key_type: *const c_char, description: *const c_char, payload: *const
     unsafe {
         let r = libc::syscall(libc::SYS_add_key, key_type, description, payload, plen, ring_id);
         if r == -1 {
-            Err(io::Error::last_os_error().into())
+            bail!("error calling sys_add_key(): {}", io::Error::last_os_error());
         } else {
             Ok(r)
         }

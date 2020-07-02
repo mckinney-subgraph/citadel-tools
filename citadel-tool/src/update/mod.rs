@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::fs;
 
-use libcitadel::{Result, Partition, ResourceImage, ImageHeader, LogLevel, Logger};
+use libcitadel::{Result, Partition, ResourceImage, ImageHeader, LogLevel, Logger, util};
 use crate::update::kernel::{KernelInstaller, KernelVersion};
 use std::collections::HashSet;
 use std::fs::DirEntry;
@@ -57,16 +56,15 @@ fn detect_duplicates(image: &ResourceImage) -> Result<()> {
         return Ok(())
     }
 
-    for dirent in fs::read_dir(resource_dir)? {
-        let dirent = dirent?;
-        match ResourceImage::from_path(dirent.path()) {
+    util::read_directory(&resource_dir, |dent| {
+        match ResourceImage::from_path(dent.path()) {
             Ok(img) => if img.metainfo().shasum() == shasum {
                 bail!("A duplicate image file with the same shasum already exists at {}", img.path().display());
             },
             Err(err) =>  warn!("{}", err),
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn install_image(path: &Path, flags: u32) -> Result<()> {
@@ -118,12 +116,10 @@ fn remove_old_extra_images(image: &ResourceImage) -> Result<()> {
     let new_meta = image.header().metainfo();
     let shasum = new_meta.shasum();
     let target_dir = target_directory(image)?;
-    for dirent in fs::read_dir(target_dir)? {
-        let dirent = dirent?;
-        let path = dirent.path();
-        maybe_remove_old_extra_image(&path, shasum)?;
-    }
-    Ok(())
+    util::read_directory(&target_dir, |dent| {
+        let path = dent.path();
+        maybe_remove_old_extra_image(&path, shasum)
+    })
 }
 
 fn maybe_remove_old_extra_image(path: &Path, shasum: &str) -> Result<()> {
@@ -137,12 +133,10 @@ fn maybe_remove_old_extra_image(path: &Path, shasum: &str) -> Result<()> {
     }
     if meta.shasum() != shasum {
         info!("Removing old extra resource image {}", path.display());
-        fs::remove_file(&path)?;
+        util::remove_file(&path)?;
     }
     Ok(())
 }
-
-
 
 fn install_kernel_image(image: &mut ResourceImage) -> Result<()> {
     if !Path::new("/boot/loader/loader.conf").exists() {
@@ -153,7 +147,7 @@ fn install_kernel_image(image: &mut ResourceImage) -> Result<()> {
     let version = metainfo.version();
     let kernel_version = match metainfo.kernel_version() {
         Some(kv) => kv,
-        None => bail!("Kernel image does not have kernel version field"),
+        None => bail!("kernel image does not have kernel version field"),
     };
     info!("kernel version is {}", kernel_version);
     install_kernel_file(image, &kernel_version)?;
@@ -164,16 +158,16 @@ fn install_kernel_image(image: &mut ResourceImage) -> Result<()> {
     let all_versions = all_boot_kernel_versions()?;
     let image_dir = target_directory(image)?;
     let mut remove_paths = Vec::new();
-    for dirent in fs::read_dir(image_dir)? {
-        let dirent = dirent?;
-        let path = dirent.path();
+    util::read_directory(&image_dir, |dent| {
+        let path = dent.path();
         if is_unused_kernel_image(&path, &all_versions)? {
             remove_paths.push(path);
         }
-    }
+        Ok(())
+    })?;
 
     for p in remove_paths {
-        fs::remove_file(p)?;
+        util::remove_file(p)?;
     }
     Ok(())
 }
@@ -216,14 +210,15 @@ fn install_kernel_file(image: &mut ResourceImage, kernel_version: &str) -> Resul
 
 fn all_boot_kernel_versions() -> Result<HashSet<String>> {
     let mut result = HashSet::new();
-    for dirent in fs::read_dir("/boot")? {
-        let dirent = dirent?;
-        if is_kernel_dirent(&dirent) {
-            if let Some(kv) = KernelVersion::parse_from_path(&dirent.path()) {
+    util::read_directory("/boot", |dent| {
+        if is_kernel_dirent(&dent) {
+            if let Some(kv) = KernelVersion::parse_from_path(&dent.path()) {
                 result.insert(kv.version());
             }
         }
-    }
+        Ok(())
+    })?;
+
     Ok(result)
 }
 
@@ -242,7 +237,7 @@ fn install_image_file(image: &ResourceImage, filename: &str) -> Result<()> {
         rotate(&image_dest)?;
     }
     info!("installing image file by moving from {} to {}", image.path().display(), image_dest.display());
-    fs::rename(image.path(), image_dest)?;
+    util::rename(image.path(), image_dest)?;
     Ok(())
 }
 
@@ -259,16 +254,14 @@ fn rotate(path: &Path) -> Result<()> {
     }
     let filename = path.file_name().unwrap();
     let dot_zero = path.with_file_name(format!("{}.0", filename.to_string_lossy()));
-    if dot_zero.exists() {
-        fs::remove_file(&dot_zero)?;
-    }
-    fs::rename(path, &dot_zero)?;
+    util::remove_file(&dot_zero)?;
+    util::rename(path, &dot_zero)?;
     Ok(())
 }
 
 fn validate_channel_name(channel: &str) -> Result<()> {
     if !channel.chars().all(|c| c.is_ascii_lowercase()) {
-        bail!("Image has invalid channel name '{}'", channel);
+        bail!("image has invalid channel name '{}'", channel);
     }
     Ok(())
 }
@@ -334,5 +327,5 @@ fn choose_install_partition(verbose: bool) -> Result<Partition> {
             return Ok(p.clone())
         }
     }
-    Err(format_err!("No suitable install partition found"))
+    bail!("no suitable install partition found")
 }

@@ -109,8 +109,10 @@ impl LogOutput for DefaultLogOutput {
 
         let stdout = io::stdout();
         let mut lock = stdout.lock();
-        lock.write_all(line.as_bytes())?;
-        lock.flush()?;
+        lock.write_all(line.as_bytes())
+            .map_err(context!("error writing log line to stdout"))?;
+        lock.flush()
+            .map_err(context!("error flushing stdout"))?;
         Ok(())
     }
 }

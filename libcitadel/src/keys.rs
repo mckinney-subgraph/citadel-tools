@@ -1,8 +1,8 @@
-use crate::Result;
-
 use sodiumoxide::randombytes::randombytes_into;
 use sodiumoxide::crypto::sign::{self,Seed,SEEDBYTES,PUBLICKEYBYTES};
 use hex;
+
+use crate::Result;
 
 ///
 /// Keys for signing or verifying signatures.  Small convenience
@@ -18,10 +18,11 @@ pub struct Signature(sign::Signature);
 impl PublicKey {
 
     pub fn from_hex(hex: &str) -> Result<PublicKey> {
-        let bytes = hex::decode(hex)?;
+        let bytes = hex::decode(hex)
+            .map_err(context!("error hex decoding public key"))?;
 
         if bytes.len() != PUBLICKEYBYTES {
-            bail!("Hex encoded public key has invalid length: {}", bytes.len());
+            bail!("hex encoded public key has invalid length: {}", bytes.len());
         }
         let pubkey = sign::PublicKey::from_slice(&bytes)
             .expect("PublicKey::from_slice() failed");
@@ -49,13 +50,14 @@ impl KeyPair {
     }
 
     pub fn from_hex(hex: &str) -> Result<KeyPair> {
-        let bytes = hex::decode(hex)?;
+        let bytes = hex::decode(hex)
+            .map_err(context!("Error hex decoding key pair"))?;
         KeyPair::from_bytes(&bytes)
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Result<KeyPair> {
         if bytes.len() != SEEDBYTES {
-            bail!("Hex encoded keypair has incorrect length");
+            bail!("hex encoded keypair has incorrect length");
         }
         let seed = sign::Seed::from_slice(&bytes).expect("Seed::from_slice() failed");
         Ok(KeyPair(seed))

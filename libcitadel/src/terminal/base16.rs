@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::terminal::{Color, Base16Shell};
 use crate::{Realm, Result, util, RealmManager};
 use std::path::Path;
-use std::fs;
+use std::{fs, io};
 use std::io::Write;
 
 lazy_static! {
@@ -123,7 +123,7 @@ impl Base16Scheme {
 
     fn write_ephemeral_realm_files(&self, manager: &RealmManager, realm: &Realm) -> Result<()> {
         let skel = realm.base_path_file("skel");
-        fs::create_dir_all(&skel)?;
+        util::create_dir(&skel)?;
         util::chown_user(&skel)?;
         self.write_realm_files(&skel)?;
         if realm.is_active() {
@@ -144,9 +144,9 @@ impl Base16Scheme {
     pub fn write_realm_files<P: AsRef<Path>>(&self, base: P) -> Result<()> {
         let base = base.as_ref();
         self.write_shell_file(base)
-            .map_err(|e| format_err!("error writing {} to {}: {}", Self::BASE16_SHELL_FILE, base.display(), e))?;
+            .map_err(context!("error writing {} to {}", Self::BASE16_SHELL_FILE, base.display()))?;
         self.write_vim_file(base)
-            .map_err(|e| format_err!("error writing {} to {}: {}", Self::BASE16_VIM_FILE, base.display(), e))?;
+            .map_err(context!("error writing {} to {}", Self::BASE16_VIM_FILE, base.display()))?;
         Ok(())
     }
 
@@ -160,16 +160,20 @@ impl Base16Scheme {
 
     fn write_vim_file(&self, dir: &Path) -> Result<()> {
         let path = dir.join(Self::BASE16_VIM_FILE);
-        let mut file = fs::File::create(&path)?;
-        writeln!(&mut file, "if !exists('g:colors_name') || g:colors_name != '{}'", self.slug())?;
-        writeln!(&mut file, "  colorscheme base16-{}", self.slug())?;
-        writeln!(&mut file, "endif")?;
-        drop(file);
+        self.write_vim_file_to(&path)
+            .map_err(context!("failed to write vim color scheme file to {:?}", path))?;
         util::chown_user(&path)?;
         debug!("Wrote base16 vim config file to {}", path.display());
         Ok(())
     }
 
+    fn write_vim_file_to(&self, path: &Path) -> io::Result<()> {
+        let mut file = fs::File::create(&path)?;
+        writeln!(&mut file, "if !exists('g:colors_name') || g:colors_name != '{}'", self.slug())?;
+        writeln!(&mut file, "  colorscheme base16-{}", self.slug())?;
+        writeln!(&mut file, "endif")?;
+        Ok(())
+    }
 }
 
 

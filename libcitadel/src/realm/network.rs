@@ -2,9 +2,9 @@ use std::path::{Path,PathBuf};
 use std::net::Ipv4Addr;
 use std::collections::{HashSet,HashMap};
 use std::io::{BufReader,BufRead,Write};
-use std::fs::{self,File};
+use std::fs::File;
 
-use crate::Result;
+use crate::{Result, util};
 
 const REALMS_RUN_PATH: &str = "/run/citadel/realms";
 
@@ -90,7 +90,8 @@ impl BridgeAllocator {
         let (addr_str, mask_size) = match network.find('/') {
             Some(idx) => {
                 let (net,bits) = network.split_at(idx);
-                (net.to_owned(), bits[1..].parse()?)
+                (net.to_owned(), bits[1..].parse()
+                    .map_err(|_| format_err!("Failed to parse netmask size ({})", &bits[1..]))?)
             },
             None => (network.to_owned(), 24),
         };
@@ -99,7 +100,7 @@ impl BridgeAllocator {
         }
         
         let mask = (1u32 << (32 - mask_size)) - 1;
-        let ip = addr_str.parse::<Ipv4Addr>()?;
+        let ip = addr_str.parse::<Ipv4Addr>().map_err(|_| format_err!("Failed to parse IP address ({})", addr_str))?;
 
         if (u32::from(ip) & mask) != 0 {
             bail!("network {} has masked bits with netmask /{}", addr_str, mask_size);
@@ -199,13 +200,12 @@ impl BridgeAllocator {
         if !path.exists() {
             return Ok(())
         }
-        let f = File::open(path)?;
+        let f = File::open(&path).map_err(context!("failed opening network state file {:?} for reading", path))?;
         let reader = BufReader::new(f);
         for line in reader.lines() {
-            let line = &line?;
+            let line = &line.map_err(context!("error reading from network state file"))?;
             self.parse_state_line(line)?;
         }
-
         Ok(())
     }
 
@@ -213,7 +213,7 @@ impl BridgeAllocator {
         match line.find(':') {
             Some(idx) => {
                 let (name,addr) = line.split_at(idx);
-                let ip = addr[1..].parse::<Ipv4Addr>()?;
+                let ip = addr[1..].parse::<Ipv4Addr>().map_err(|_| format_err!("Failed to parse IP address ({})", &addr[1..]))?;
                 self.allocated.insert(ip);
                 self.allocations.insert(name.to_owned(), ip);
             },
@@ -225,15 +225,13 @@ impl BridgeAllocator {
     fn write_state(&mut self) -> Result<()> {
         let path = self.state_file_path();
         let dir = path.parent().unwrap();
-        if !dir.exists() {
-            fs::create_dir_all(dir)
-                .map_err(|e| format_err!("failed to create directory {} for network allocation state file: {}", dir.display(), e))?;
-        }
+        util::create_dir(dir)?;
         let mut f = File::create(&path)
-            .map_err(|e| format_err!("failed to open network state file {} for writing: {}", path.display(), e))?;
+            .map_err(context!("failed to open network state file {:?} for writing", path))?;
 
         for (realm,addr) in &self.allocations {
-            writeln!(f, "{}:{}", realm, addr)?;
+            writeln!(f, "{}:{}", realm, addr)
+                .map_err(context!("error writing to network allocation state file"))?;
         }
         Ok(())
     }

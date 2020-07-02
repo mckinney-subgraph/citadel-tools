@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::fs;
 
-use libcitadel::Result;
+use libcitadel::{Result, util};
 
 ///
 /// Represents a disk partition device on the system
@@ -21,12 +20,12 @@ impl DiskPartition {
 
     /// Return list of all vfat partitions on the system as a `Vec<DiskPartition>`
     pub fn boot_partitions(check_guid: bool) -> Result<Vec<DiskPartition>> {
-        let pp = fs::read_to_string("/proc/partitions")?;
+        let pp = util::read_to_string("/proc/partitions")?;
         let mut v = Vec::new();
         for line in pp.lines().skip(2)
         {
             let part = DiskPartition::from_proc_line(&line)
-                .map_err(|e| format_err!("Failed to parse line '{}': {}", line, e))?;
+                .map_err(context!("failed to parse line '{}'", line))?;
 
             if part.is_boot_partition(check_guid)? {
                 v.push(part);

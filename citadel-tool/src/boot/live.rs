@@ -1,12 +1,12 @@
-
 use std::path::Path;
 use std::ffi::OsStr;
 use std::fs;
 use std::thread::{self,JoinHandle};
 use std::time::{self,Instant};
 
-use libcitadel::{Result, UtsName};
+use libcitadel::{Result, UtsName, util};
 use libcitadel::ResourceImage;
+
 use crate::boot::disks;
 use crate::boot::rootfs::setup_rootfs_resource;
 use crate::install::installer::Installer;
@@ -36,7 +36,7 @@ fn copy_artifacts() -> Result<()> {
         info!("Failed to find partition with images, trying again in 2 seconds");
         thread::sleep(time::Duration::from_secs(2));
     }
-    Err(format_err!("Could not find partition containing resource images"))
+    bail!("could not find partition containing resource images")
 
 }
 
@@ -69,24 +69,23 @@ fn kernel_version() -> String {
 fn deploy_artifacts() -> Result<()> {
     let run_images = Path::new(IMAGE_DIRECTORY);
     if !run_images.exists() {
-        fs::create_dir_all(run_images)?;
+        util::create_dir(run_images)?;
         cmd!("/bin/mount", "-t tmpfs -o size=4g images /run/citadel/images")?;
     }
 
-    for entry in fs::read_dir("/boot/images")? {
-        let entry = entry?;
-        println!("Copying {:?} from /boot/images to /run/citadel/images", entry.file_name());
-        fs::copy(entry.path(), run_images.join(entry.file_name()))?;
-    }
+    util::read_directory("/boot/images", |dent| {
+        println!("Copying {:?} from /boot/images to /run/citadel/images", dent.file_name());
+        util::copy_file(dent.path(), run_images.join(dent.file_name()))
+    })?;
 
     let kv = kernel_version();
     println!("Copying bzImage-{} to /run/citadel/images", kv);
     let from = format!("/boot/bzImage-{}", kv);
     let to = format!("/run/citadel/images/bzImage-{}", kv);
-    fs::copy(from, to)?;
+    util::copy_file(&from, &to)?;
 
     println!("Copying bootx64.efi to /run/citadel/images");
-    fs::copy("/boot/EFI/BOOT/bootx64.efi", "/run/citadel/images/bootx64.efi")?;
+    util::copy_file("/boot/EFI/BOOT/bootx64.efi", "/run/citadel/images/bootx64.efi")?;
 
     deploy_syslinux_artifacts()?;
 
@@ -104,21 +103,23 @@ fn deploy_syslinux_artifacts() -> Result<()> {
     println!("Copying contents of /boot/syslinux to /run/citadel/images/syslinux");
 
     let run_images_syslinux = Path::new("/run/citadel/images/syslinux");
-    fs::create_dir_all(run_images_syslinux)?;
-    for entry in fs::read_dir(boot_syslinux)? {
-        let entry = entry?;
-        if let Some(ext) = entry.path().extension() {
+    util::create_dir(run_images_syslinux)?;
+
+    util::read_directory(boot_syslinux, |dent| {
+        if let Some(ext) = dent.path().extension() {
             if ext == "c32" || ext == "bin" {
-                fs::copy(entry.path(), run_images_syslinux.join(entry.file_name()))?;
+                util::copy_file(dent.path(), run_images_syslinux.join(dent.file_name()))?;
             }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn find_rootfs_image() -> Result<ResourceImage> {
-    for entry in fs::read_dir(IMAGE_DIRECTORY)? {
-        let entry = entry?;
+    let entries = fs::read_dir(IMAGE_DIRECTORY)
+        .map_err(context!("error reading directory {}", IMAGE_DIRECTORY))?;
+    for entry in entries {
+        let entry = entry.map_err(context!("error reading directory entry"))?;
         if entry.path().extension() == Some(OsStr::new("img")) {
             if let Ok(image) = ResourceImage::from_path(&entry.path()) {
                 if image.metainfo().image_type() == "rootfs" {
@@ -127,23 +128,23 @@ fn find_rootfs_image() -> Result<ResourceImage> {
             }
         }
     }
-    Err(format_err!("Unable to find rootfs resource image in {}", IMAGE_DIRECTORY))
-
+    bail!("unable to find rootfs resource image in {}", IMAGE_DIRECTORY)
 }
 
 fn decompress_images() -> Result<()> {
     info!("Decompressing images");
     let mut threads = Vec::new();
-    for entry in fs::read_dir("/run/citadel/images")? {
-        let entry = entry?;
-        if entry.path().extension() == Some(OsStr::new("img")) {
-            if let Ok(image) = ResourceImage::from_path(&entry.path()) {
+    util::read_directory("/run/citadel/images", |dent| {
+        if dent.path().extension() == Some(OsStr::new("img")) {
+            if let Ok(image) = ResourceImage::from_path(&dent.path()) {
                 if image.is_compressed() {
                     threads.push(decompress_one_image(image));
                 }
             }
         }
-    }
+        Ok(())
+    })?;
+
     for t in threads {
         t.join().unwrap()?;
     }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 
-use crate::{RealmFS, RealmManager, Result};
+use crate::{RealmFS, RealmManager, Result, util};
 
 pub struct RealmFSSet {
     realmfs_map: HashMap<String, RealmFS>,
@@ -21,12 +21,23 @@ impl RealmFSSet {
 
     fn load_all() -> Result<Vec<RealmFS>> {
         let mut v = Vec::new();
-        for entry in fs::read_dir(RealmFS::BASE_PATH)? {
-            let entry = entry?;
+        util::read_directory(RealmFS::BASE_PATH, |dent| {
+            if let Some(realmfs) = Self::entry_to_realmfs(dent) {
+                v.push(realmfs)
+            }
+            Ok(())
+        })?;
+        /*
+        let entries = fs::read_dir(RealmFS::BASE_PATH)
+            .map_err(context!("error reading realmfs directory {}", RealmFS::BASE_PATH))?;
+        for entry in entries {
+            let entry = entry.map_err(context!("error reading directory entry"))?;
             if let Some(realmfs) = Self::entry_to_realmfs(&entry) {
                 v.push(realmfs)
             }
         }
+
+         */
         Ok(v)
     }
 

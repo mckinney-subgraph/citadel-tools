@@ -3,7 +3,7 @@ use std::fmt;
 use std::fs::{self, DirEntry};
 use std::path::{PathBuf, Path};
 
-use crate::{Result, RealmFS, CommandLine, ImageHeader};
+use crate::{Result, RealmFS, CommandLine, ImageHeader, util};
 use crate::verity::Verity;
 
 
@@ -28,7 +28,8 @@ impl Mountpoint {
     /// Read `RealmFS::RUN_DIRECTORY` to collect all current mountpoints
     /// and return them.
     pub fn all_mountpoints() -> Result<Vec<Mountpoint>> {
-        let all = fs::read_dir(RealmFS::RUN_DIRECTORY)?
+        let all = fs::read_dir(RealmFS::RUN_DIRECTORY)
+            .map_err(context!("error reading realmfs run directory {}", RealmFS::RUN_DIRECTORY))?
             .flat_map(|e| e.ok())
             .map(Into::into)
             .filter(Mountpoint::is_valid)
@@ -51,11 +52,6 @@ impl Mountpoint {
         self.0.exists()
     }
 
-    fn create_dir(&self) -> Result<()> {
-        fs::create_dir_all(self.path())?;
-        Ok(())
-    }
-
     pub fn is_mounted(&self) -> bool {
         // test for an arbitrary expected directory
         self.path().join("etc").exists()
@@ -73,9 +69,8 @@ impl Mountpoint {
             return Ok(())
         }
 
-        if !self.exists() {
-            self.create_dir()?;
-        }
+        util::create_dir(self.path())?;
+
         let verity_path = self.verity_device_path();
         if verity_path.exists() {
             warn!("dm-verity device {:?} already exists which was not expected", verity_path);

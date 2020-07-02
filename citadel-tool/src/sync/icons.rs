@@ -1,9 +1,8 @@
 use crate::sync::icon_cache::IconCache;
 use std::collections::HashSet;
-use std::fs;
 use std::path::Path;
 
-use libcitadel::{Result, Realms};
+use libcitadel::{Result, Realms, util};
 use std::cell::{RefCell, Cell};
 
 pub struct IconSync {
@@ -57,14 +56,14 @@ impl IconSync {
         let mut names: Vec<String> = self.known.borrow().iter().map(|s| s.to_string()).collect();
         names.sort_unstable();
         let out = names.join("\n") + "\n";
-        fs::write(Self::KNOWN_ICONS_FILE, out)?;
+        util::write_file(Self::KNOWN_ICONS_FILE, out)?;
         Ok(())
     }
 
     fn read_known_cache() -> Result<HashSet<String>> {
         let target = Path::new(Self::KNOWN_ICONS_FILE);
         if target.exists() {
-            let content = fs::read_to_string(target)?;
+            let content = util::read_to_string(target)?;
             Ok(content.lines().map(|s| s.to_string()).collect())
         } else {
             Ok(HashSet::new())
@@ -77,13 +76,14 @@ impl IconSync {
             return Ok(false)
         }
         let mut found = false;
-        for entry in fs::read_dir(&base)? {
-            let entry = entry?;
-            let apps = entry.path().join("apps");
+        util::read_directory(&base, |dent| {
+            let apps = dent.path().join("apps");
             if apps.exists() && self.search_subdirectory(&base, &apps, icon_name)? {
                 found = true;
             }
-        }
+            Ok(())
+        })?;
+
         if found {
             self.add_known(icon_name);
         }
@@ -92,28 +92,28 @@ impl IconSync {
 
     fn search_subdirectory(&self, base: &Path, subdir: &Path, icon_name: &str) -> Result<bool> {
         let mut found = false;
-        for entry in fs::read_dir(subdir)? {
-            let entry = entry?;
-            let path = entry.path();
+        util::read_directory(subdir, |dent| {
+            let path = dent.path();
             if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
                 if stem == icon_name {
                     self.copy_icon_file(base, &path)?;
                     found = true;
                 }
             }
-        }
+            Ok(())
+        })?;
+
         Ok(found)
     }
 
     fn copy_icon_file(&self, base: &Path, icon_path: &Path) -> Result<()> {
         verbose!("copy icon file {}", icon_path.display());
-        let stripped = icon_path.strip_prefix(base)?;
+        let stripped = icon_path.strip_prefix(base)
+            .map_err(|_| format_err!("Failed to strip base path {:?} from icon path {:?}", base, icon_path))?;
         let target = Path::new(Self::CITADEL_ICONS).join("hicolor").join(stripped);
         let parent = target.parent().unwrap();
-        if !parent.exists() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(icon_path, target)?;
+        util::create_dir(parent)?;
+        util::copy_file(icon_path, target)?;
         Ok(())
     }
 }

@@ -1,17 +1,16 @@
-use std::process::Command;
-use std::path::Path;
 use std::env;
+use std::path::Path;
+use std::process::{Command,Stdio};
+use std::sync::Mutex;
+
+use crate::{Result,Realm};
+use crate::realm::{
+    launcher::RealmLauncher,
+    network::NetworkConfig
+};
 
 const SYSTEMCTL_PATH: &str = "/usr/bin/systemctl";
 const MACHINECTL_PATH: &str = "/usr/bin/machinectl";
-
-use crate::Result;
-
-use crate::Realm;
-use std::sync::Mutex;
-use std::process::Stdio;
-use crate::realm::network::NetworkConfig;
-use crate::realm::launcher::RealmLauncher;
 
 pub struct Systemd {
     network: Mutex<NetworkConfig>,
@@ -56,7 +55,8 @@ impl Systemd {
         for dir in realm.config().ephemeral_persistent_dirs() {
             let src = home.join(&dir);
             if src.exists() {
-                let src = src.canonicalize()?;
+                let src = src.canonicalize()
+                    .map_err(context!("failed to canonicalize {:?}", src))?;
                 if src.starts_with(&home) && src.exists() {
                     let dst = Path::new("/home/user").join(&dir);
                     self.machinectl_bind(realm, &src, &dst)?;
@@ -86,12 +86,13 @@ impl Systemd {
     }
 
     fn run_systemctl(&self, op: &str, name: &str) -> Result<bool> {
-        Command::new(SYSTEMCTL_PATH)
+        let ok = Command::new(SYSTEMCTL_PATH)
             .arg(op)
             .arg(name)
             .status()
             .map(|status| status.success())
-            .map_err(|e| format_err!("failed to execute {}: {}", MACHINECTL_PATH, e))
+            .map_err(context!("failed to execute {}", MACHINECTL_PATH))?;
+        Ok(ok)
     }
 
     pub fn machinectl_copy_to(&self, realm: &Realm, from: impl AsRef<Path>, to: &str) -> Result<()> {
@@ -100,7 +101,7 @@ impl Systemd {
         Command::new(MACHINECTL_PATH)
             .args(&["copy-to", realm.name(), from, to ])
             .status()
-            .map_err(|e| format_err!("failed to machinectl copy-to {} {} {}: {}", realm.name(), from, to, e))?;
+            .map_err(context!("failed to machinectl copy-to {} {} {}", realm.name(), from, to))?;
         Ok(())
     }
 
@@ -110,17 +111,18 @@ impl Systemd {
         Command::new(MACHINECTL_PATH)
             .args(&["--mkdir", "bind", realm.name(), from.as_str(), to.as_str() ])
             .status()
-            .map_err(|e| format_err!("failed to machinectl bind {} {} {}: {}", realm.name(), from, to, e))?;
+            .map_err(context!("failed to machinectl bind {} {} {}", realm.name(), from, to))?;
         Ok(())
     }
 
     pub fn is_active(realm: &Realm) -> Result<bool> {
-        Command::new(SYSTEMCTL_PATH)
+        let ok = Command::new(SYSTEMCTL_PATH)
             .args(&["--quiet", "is-active"])
             .arg(format!("realm-{}", realm.name()))
             .status()
             .map(|status| status.success())
-            .map_err(|e| format_err!("failed to execute {}: {}", SYSTEMCTL_PATH, e))
+            .map_err(context!("failed to execute {}", SYSTEMCTL_PATH))?;
+        Ok(ok)
     }
 
     pub fn are_realms_active(realms: &mut Vec<Realm>) -> Result<String> {
@@ -132,7 +134,8 @@ impl Systemd {
             .arg("is-active")
             .args(args)
             .stderr(Stdio::inherit())
-            .output()?;
+            .output()
+            .map_err(context!("failed to run /usr/bin/systemctl"))?;
 
         Ok(String::from_utf8(result.stdout).unwrap().trim().to_owned())
     }
@@ -175,7 +178,7 @@ impl Systemd {
             cmd.arg(arg.as_ref());
         }
 
-        cmd.status().map_err(|e| format_err!("failed to execute{}: {}", MACHINECTL_PATH, e))?;
+        cmd.status().map_err(context!("failed to execute {}", MACHINECTL_PATH))?;
         Ok(())
     }
 }

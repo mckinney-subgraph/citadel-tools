@@ -1,22 +1,8 @@
-#[macro_use] extern crate failure;
 #[macro_use] extern crate nix;
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate lazy_static;
 
-use std::result;
-use failure::Error;
-
-pub fn format_error(err: &Error) -> String {
-    let mut output = err.to_string();
-    let mut prev = err.as_fail();
-    while let Some(next) = prev.cause() {
-        output.push_str(": ");
-        output.push_str(&next.to_string());
-        prev = next;
-    }
-    output
-}
-
+#[macro_use] pub mod error;
 #[macro_use] mod log;
 #[macro_use] mod exec;
 mod blockdev;
@@ -87,7 +73,7 @@ pub fn public_key_for_channel(channel: &str) -> Result<Option<PublicKey>> {
     Ok(None)
 }
 
-pub type Result<T> = result::Result<T,Error>;
+pub use error::{Result,Error};
 
 pub const BLOCK_SIZE: usize = 4096;
 

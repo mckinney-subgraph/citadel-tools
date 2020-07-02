@@ -1,11 +1,10 @@
-use std::fs::{self,File,DirEntry};
+use std::fs::{File,DirEntry};
 use std::ffi::OsStr;
 use std::io::{self,Seek,SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::{CommandLine, OsRelease, ImageHeader, MetaInfo, Result, Partition, Mounts, util, LoopDevice};
+use crate::{Result, CommandLine, OsRelease, ImageHeader, MetaInfo, Partition, Mounts, util, LoopDevice};
 
-use failure::ResultExt;
 use std::sync::Arc;
 use crate::UtsName;
 use crate::verity::Verity;
@@ -49,7 +48,7 @@ impl ResourceImage {
         }
 
         if !Self::ensure_storage_mounted()? {
-            bail!("Unable to mount /storage");
+            bail!("unable to mount /storage");
         }
 
         let storage_path = Path::new(STORAGE_BASEDIR).join(&channel);
@@ -58,7 +57,7 @@ impl ResourceImage {
            return Ok(image);
         }
 
-        Err(format_err!("Failed to find resource image of type: {}", image_type))
+        bail!("failed to find resource image of type: {}", image_type)
     }
 
     pub fn mount_image_type(image_type: &str) -> Result<()> {
@@ -70,14 +69,14 @@ impl ResourceImage {
     pub fn find_rootfs() -> Result<Self> {
         match search_directory(RUN_DIRECTORY, "rootfs", None)? {
             Some(image) => Ok(image),
-            None => Err(format_err!("Failed to find rootfs resource image")),
+            None => bail!("failed to find rootfs resource image"),
         }
     }
 
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
         let header = ImageHeader::from_file(path.as_ref())?;
         if !header.is_magic_valid() {
-            bail!("Image file {} does not have a valid header", path.as_ref().display());
+            bail!("image file {:?} does not have a valid header", path.as_ref());
         }
         Ok(Self::new(path.as_ref(), header ))
     }
@@ -143,25 +142,28 @@ impl ResourceImage {
             return Ok(())
         }
         info!("decompressing image file {}", self.path().display());
-        let mut reader = File::open(self.path())?;
-        reader.seek(SeekFrom::Start(4096))?;
+        let mut reader = File::open(self.path())
+            .map_err(context!("error opening image file {:?}", self.path()))?;
+        reader.seek(SeekFrom::Start(4096))
+            .map_err(context!("error seeking to offset 4096 in image file {:?}", self.path()))?;
 
         let xzfile = self.path.with_extension("tmp.xz");
-        let mut out = File::create(&xzfile)?;
-        io::copy(&mut reader, &mut out)?;
+        let mut out = File::create(&xzfile)
+            .map_err(context!("error creating temporary file {:?}", xzfile))?;
+        io::copy(&mut reader, &mut out)
+            .map_err(context!("error copying image file {:?} to temporary file", self.path()))?;
 
         util::xz_decompress(xzfile)?;
-        fs::rename(self.path.with_extension("tmp"), self.path())?;
+        let tmpfile = self.path.with_extension("tmp");
+        util::rename(&tmpfile, self.path())?;
 
         self.header.clear_flag(ImageHeader::FLAG_DATA_COMPRESSED);
-        self.header.write_header_to(self.path())?;
-
-        Ok(())
+        self.header.write_header_to(self.path())
     }
 
     pub fn write_to_partition(&self, partition: &Partition) -> Result<()> {
         if self.metainfo().image_type() != "rootfs" {
-            bail!("Cannot write to partition, image type is not rootfs");
+            bail!("cannot write to partition, image type is not rootfs");
         }
 
         if !self.has_verity_hashtree() {
@@ -183,7 +185,7 @@ impl ResourceImage {
 
         info!("Mounting dm-verity device to {}", mount_path.display());
 
-        fs::create_dir_all(mount_path)?;
+        util::create_dir(mount_path)?;
 
         util::mount(verity_path, mount_path, None)?;
         Ok(ResourceMount::new_verity(mount_path, verity_dev))
@@ -195,11 +197,11 @@ impl ResourceImage {
             match self.header.public_key()? {
                 Some(pubkey) => {
                     if !self.header.verify_signature(pubkey) {
-                        bail!("Header signature verification failed");
+                        bail!("header signature verification failed");
                     }
                     info!("Image header signature is valid");
                 }
-                None => bail!("Cannot verify header signature because no public key for channel {} is available", self.metainfo().channel())
+                None => bail!("cannot verify header signature because no public key for channel {} is available", self.metainfo().channel())
             }
         }
         info!("Setting up dm-verity device for image");
@@ -240,7 +242,7 @@ impl ResourceImage {
         }
         info!("Calculating sha256 of image");
         let output = util::exec_cmdline_pipe_input("sha256sum", "-", self.path(), util::FileRange::Range{offset: 4096, len: self.metainfo().nblocks() * 4096})
-            .context(format!("failed to calculate sha256 on {}", self.path().display()))?;
+            .map_err(context!("failed to calculate sha256 on {:?}", self.path()))?;
         let v: Vec<&str> = output.split_whitespace().collect();
         let shasum = v[0].trim().to_owned();
         Ok(shasum)
@@ -261,7 +263,7 @@ impl ResourceImage {
         info!("Loop device created: {}", loopdev);
         info!("Mounting to: {}", mount_path.display());
 
-        fs::create_dir_all(mount_path)?;
+        util::create_dir(mount_path)?;
 
         util::mount(&loopdev.device_str(), mount_path, Some("-oro"))?;
 
@@ -286,7 +288,8 @@ impl ResourceImage {
             warn!("No manifest file found for resource image: {}", self.path.display());
             return Ok(())
         }
-        let s = fs::read_to_string(manifest)?;
+        let s = util::read_to_string(manifest)?;
+
         for line in s.lines() {
             if let Err(e) = self.process_manifest_line(&line) {
                 warn!("Processing manifest file for resource image ({}): {}", self.path.display(), e);
@@ -416,7 +419,7 @@ fn parse_timestamp(img: &ResourceImage) -> Result<usize> {
     let ts = img.metainfo()
         .timestamp()
         .parse::<usize>()
-        .context(format!("Error parsing timestamp for resource image {}", img.path().display()))?;
+        .map_err(|_| format_err!("error parsing timestamp for resource image {:?}", img.path()))?;
     Ok(ts)
 }
 
@@ -441,9 +444,10 @@ fn all_matching_images(dir: &Path, image_type: &str, channel: Option<&str>) -> R
     let kernel_id = OsRelease::citadel_kernel_id();
 
     let mut v = Vec::new();
-    for entry in fs::read_dir(dir)? {
-        maybe_add_dir_entry(entry?, image_type, channel, kv, kernel_id, &mut v)?;
-    }
+    util::read_directory(dir, |dent| {
+        maybe_add_dir_entry(dent, image_type, channel, kv, kernel_id, &mut v)?;
+        Ok(())
+    })?;
     Ok(v)
 }
 
@@ -454,7 +458,7 @@ fn all_matching_images(dir: &Path, image_type: &str, channel: Option<&str>) -> R
 //
 // If the entry is a match, then instantiate a ResourceImage and add it to
 // the images vector.
-fn maybe_add_dir_entry(entry: DirEntry,
+fn maybe_add_dir_entry(entry: &DirEntry,
                        image_type: &str,
                        channel: Option<&str>,
                        kernel_version: Option<&str>,
@@ -465,7 +469,8 @@ fn maybe_add_dir_entry(entry: DirEntry,
     if Some(OsStr::new("img")) != path.extension() {
         return Ok(())
     }
-    let meta = entry.metadata()?;
+    let meta = entry.metadata()
+        .map_err(context!("failed to read metadata for {:?}", entry.path()))?;
     if meta.len() < ImageHeader::HEADER_SIZE as u64 {
         return Ok(())
     }

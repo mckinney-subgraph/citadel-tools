@@ -1,7 +1,7 @@
 use std::path::{Path,PathBuf};
 use std::fs;
 
-use libcitadel::Result;
+use libcitadel::{Result, util};
 
 
 #[derive(Debug, Clone)]
@@ -15,13 +15,15 @@ pub struct Disk {
 impl Disk {
     pub fn probe_all() -> Result<Vec<Disk>> {
         let mut v = Vec::new();
-        for entry in fs::read_dir("/sys/block")? {
-            let path = entry?.path();
+        util::read_directory("/sys/block", |dent| {
+            let path = dent.path();
             if Disk::is_disk_device(&path) {
                 let disk = Disk::read_device(&path)?;
                 v.push(disk);
             }
-        }
+            Ok(())
+        })?;
+
         Ok(v)
     }
 
@@ -32,18 +34,20 @@ impl Disk {
     fn read_device(device: &Path) -> Result<Disk> {
         let path = Path::new("/dev/").join(device.file_name().unwrap());
 
-        let size = fs::read_to_string(device.join("size"))?
+        let size = fs::read_to_string(device.join("size"))
+            .map_err(context!("failed to read device size for {:?}", device))?
             .trim()
-            .parse::<usize>()?;
+            .parse::<usize>()
+            .map_err(context!("error parsing device size for {:?}", device))?;
 
         let size_str = format!("{}G", size >> 21);
 
-        let model = fs::read_to_string(device.join("device/model"))?
+        let model = fs::read_to_string(device.join("device/model"))
+            .map_err(context!("failed to read device/model for {:?}", device))?
             .trim()
             .to_string();
 
         Ok(Disk { path, size, size_str, model })
-
     }
 
     pub fn path(&self) -> &Path {
@@ -57,5 +61,4 @@ impl Disk {
     pub fn model(&self) -> &str {
         &self.model
     }
-
 }

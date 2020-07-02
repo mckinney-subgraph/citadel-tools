@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use toml;
-use crate::{Result, Realms};
+use crate::{Result, Realms, util};
 
 lazy_static! {
     pub static ref GLOBAL_CONFIG: RealmConfig = RealmConfig::load_global_config();
@@ -147,16 +147,14 @@ impl RealmConfig {
         None
     }
 
-    pub fn write_config<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let serialized = toml::to_string(self)?;
-        fs::write(path.as_ref(), serialized)?;
-        Ok(())
+    pub fn write_to<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        let serialized = toml::to_string(self)
+            .map_err(context!("failed to serialize realm config"))?;
+        util::write_file(path, serialized)
     }
 
     pub fn write(&self) -> Result<()> {
-        let serialized = toml::to_string(self)?;
-        fs::write(&self.path, serialized)?;
-        Ok(())
+        self.write_to(&self.path)
     }
 
     fn read_mtime(&self) -> i64 {
@@ -171,8 +169,9 @@ impl RealmConfig {
         let path = self.path.clone();
 
         if self.path.exists() {
-            let s = fs::read_to_string(&self.path)?;
-            *self = toml::from_str(&s)?;
+            let s = util::read_to_string(&self.path)?;
+            *self = toml::from_str(&s)
+                .map_err(context!("Failed to parse realm config"))?;
         } else {
             *self = Self::empty();
         }

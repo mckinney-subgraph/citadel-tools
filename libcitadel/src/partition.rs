@@ -1,7 +1,9 @@
-use std::path::{Path,PathBuf};
 use std::fs;
-use crate::{Result,ImageHeader,MetaInfo,Mounts,PublicKey,public_key_for_channel};
+use std::path::{Path,PathBuf};
 use std::sync::Arc;
+
+use crate::{Result, ImageHeader, MetaInfo, Mounts, PublicKey, public_key_for_channel,util};
+
 
 #[derive(Clone)]
 pub struct Partition {
@@ -121,17 +123,21 @@ impl Partition {
 
     pub fn write_status(&mut self, status: u8) -> Result<()> {
         self.header().set_status(status);
-        self.header().write_partition(&self.path)
+        self.write_header()
     }
 
     pub fn set_flag_and_write(&mut self, flag: u8) -> Result<()> {
         self.header().set_flag(flag);
-        self.header().write_partition(&self.path)
+        self.write_header()
     }
 
     pub fn clear_flag_and_write(&mut self, flag: u8) -> Result<()> {
         self.header().clear_flag(flag);
-        self.header().write_partition(&self.path)
+        self.write_header()
+    }
+
+    fn write_header(&self) -> Result<()> {
+        self.header().write_partition(&self.path).into()
     }
 
     /// Called at boot to perform various checks and possibly
@@ -180,29 +186,36 @@ fn is_in_use(path: &Path) -> Result<bool> {
 //
 fn count_block_holders(path: &Path) -> Result<usize> {
     if !path.exists() {
-        bail!("Path to rootfs device does not exist: {}", path.display());
+        bail!("path {:?} to rootfs device does not exist", path);
     }
-    let resolved = fs::canonicalize(path)?;
+    let resolved = fs::canonicalize(path)
+        .map_err(context!("failed to canonicalize path {:?}", path))?;
     let fname = match resolved.file_name() {
         Some(s) => s,
-        None => bail!("path does not have filename?"),
+        None => bail!("path {:?} does not have a filename", resolved),
     };
     let holders_dir =
         Path::new("/sys/block")
         .join(fname)
         .join("holders");
-    let count = fs::read_dir(holders_dir)?.count();
+
+    let count = fs::read_dir(&holders_dir)
+        .map_err(context!("cannot read directory {:?}", holders_dir))?
+        .count();
     Ok(count)
 }
 
 fn rootfs_partition_paths() -> Result<Vec<PathBuf>> {
     let mut rootfs_paths = Vec::new();
-    for dent in fs::read_dir("/dev/mapper")? {
-        let path = dent?.path();
+
+    util::read_directory("/dev/mapper", |dent| {
+        let path = dent.path();
         if is_path_rootfs(&path) {
             rootfs_paths.push(path);
         }
-    }
+        Ok(())
+
+    })?;
     Ok(rootfs_paths)
 }
 

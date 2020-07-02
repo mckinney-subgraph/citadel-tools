@@ -4,6 +4,7 @@ use std::path::Path;
 use std::collections::HashMap;
 
 use libcitadel::Result;
+use std::io;
 
 
 pub struct DesktopFile {
@@ -20,14 +21,17 @@ impl DesktopFile {
 
     pub fn write_to_dir<P: AsRef<Path>>(&self, directory: P) -> Result<()> {
         let path = directory.as_ref().join(&self.filename);
-        let f = File::create(&path)?;
-        self.write_to(f)?;
+        let f = File::create(&path)
+            .map_err(context!("failed to open desktop file {:?}", path))?;
+        self.write_to(f)
+            .map_err(context!("error writing to desktop file {:?}", path))?;
         Ok(())
     }
 
     pub fn write_to<W: Write>(&self, mut w: W) -> Result<()> {
         for line in &self.lines {
-            line.write_to(&mut w)?;
+            line.write_to(&mut w)
+                .map_err(context!("error writing line ({:?}) to desktop file", line))?;
         }
         Ok(())
     }
@@ -173,7 +177,7 @@ impl Line {
         }
     }
 
-    fn write_to<W: Write>(&self, mut w: W) -> Result<()> {
+    fn write_to<W: Write>(&self, mut w: W) -> io::Result<()> {
         match *self {
             Line::Empty => writeln!(w)?,
             Line::Comment(ref s) => writeln!(w, "#{}", s)?,

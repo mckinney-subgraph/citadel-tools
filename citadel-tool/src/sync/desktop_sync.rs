@@ -1,10 +1,9 @@
 use std::collections::HashSet;
 use std::ffi::{OsStr,OsString};
-use std::fs;
 use std::path::{Path,PathBuf};
 use std::time::SystemTime;
 
-use libcitadel::{Realm,Realms,Result};
+use libcitadel::{Realm, Realms, Result, util};
 use crate::sync::parser::DesktopFileParser;
 use std::fs::DirEntry;
 use crate::sync::icons::IconSync;
@@ -69,9 +68,7 @@ impl DesktopFileSync {
 
         let target = Path::new(Self::CITADEL_APPLICATIONS);
 
-        if !target.exists() {
-            fs::create_dir_all(&target)?;
-        }
+        util::create_dir(&target)?;
 
         if clear {
             Self::clear_target_files()?;
@@ -89,14 +86,15 @@ impl DesktopFileSync {
     fn collect_source_files(&mut self,  directory: impl AsRef<Path>) -> Result<()> {
         let directory = Realms::current_realm_symlink().join(directory.as_ref());
         if directory.exists() {
-            for entry in fs::read_dir(directory)? {
-                self.process_source_entry(entry?);
-            }
+            util::read_directory(&directory, |dent| {
+                self.process_source_entry(dent);
+                Ok(())
+            })?;
         }
         Ok(())
     }
 
-    fn process_source_entry(&mut self, entry: DirEntry) {
+    fn process_source_entry(&mut self, entry: &DirEntry) {
         let path = entry.path();
         if path.extension() == Some(OsStr::new("desktop")) {
             if let Some(mtime) = Self::mtime(&path) {
@@ -106,24 +104,21 @@ impl DesktopFileSync {
     }
 
     pub fn clear_target_files() -> Result<()> {
-        for entry in fs::read_dir(Self::CITADEL_APPLICATIONS)? {
-            let entry = entry?;
-            fs::remove_file(entry.path())?;
-        }
-        Ok(())
+        util::read_directory(Self::CITADEL_APPLICATIONS, |dent| {
+            util::remove_file(dent.path())
+        })
     }
 
     fn remove_missing_target_files(&mut self) -> Result<()> {
         let sources = self.source_filenames();
-        for entry in fs::read_dir(Self::CITADEL_APPLICATIONS)? {
-            let entry = entry?;
-            if !sources.contains(&entry.file_name()) {
-                let path = entry.path();
+        util::read_directory(Self::CITADEL_APPLICATIONS, |dent| {
+            if !sources.contains(&dent.file_name()) {
+                let path = dent.path();
                 verbose!("Removing desktop entry that no longer exists: {:?}", path);
-                fs::remove_file(path)?;
+                util::remove_file(path)?;
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
     fn mtime(path: &Path) -> Option<SystemTime> {

@@ -1,8 +1,7 @@
-use std::fs;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::Result;
+use crate::{Result, util};
 
 pub struct Mounts {
     content: String,
@@ -34,7 +33,7 @@ impl Mounts {
     }
 
     pub fn load() -> Result<Mounts> {
-        let content  = fs::read_to_string("/proc/mounts")?;
+        let content  = util::read_to_string("/proc/mounts")?;
         Ok(Mounts { content })
     }
 

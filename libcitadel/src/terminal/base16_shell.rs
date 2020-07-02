@@ -1,8 +1,7 @@
-use std::fs;
 use std::path::Path;
 
 use crate::terminal::Base16Scheme;
-use crate::Result;
+use crate::{Result, util};
 
 const TEMPLATE: &str = r##"
 if [ -n "$TMUX" ]; then
@@ -70,8 +69,8 @@ impl Base16Shell {
 
     pub fn write_script<P: AsRef<Path>>(path: P, scheme: &Base16Scheme) -> Result<()> {
         let output = Base16Shell::new(scheme.clone()).build();
-        fs::write(path.as_ref(), output)?;
-        Ok(())
+        let path = path.as_ref();
+        util::write_file(path, output)
     }
 
     fn new(scheme: Base16Scheme) -> Self {

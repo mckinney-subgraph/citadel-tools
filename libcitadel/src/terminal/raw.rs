@@ -1,31 +1,31 @@
 use std::mem;
 use std::io::{self,Write};
-use libc::c_int;
 
 pub use libc::termios as Termios;
+use libc::c_int;
 
 use crate::Result;
 
-fn get_terminal_attr() -> io::Result<Termios> {
+fn get_terminal_attr() -> Result<Termios> {
     extern "C" {
         pub fn tcgetattr(fd: c_int, termptr: *mut Termios) -> c_int;
     }
     unsafe {
         let mut termios = mem::zeroed();
         if tcgetattr(0, &mut termios) == -1 {
-            return Err(io::Error::last_os_error())
+            bail!("error calling tcgetattr() on terminal: {}", io::Error::last_os_error());
         }
         Ok(termios)
     }
 }
 
-fn set_terminal_attr(termios: &Termios) -> io::Result<()> {
+fn set_terminal_attr(termios: &Termios) -> Result<()> {
     extern "C" {
         pub fn tcsetattr(fd: c_int, opt: c_int, termptr: *const Termios) -> c_int;
     }
     unsafe {
         if tcsetattr(0, 0, termios) == -1 {
-            return Err(io::Error::last_os_error())
+            bail!("error calling tcsetattr() on terminal: {}", io::Error::last_os_error());
         }
         Ok(())
     }

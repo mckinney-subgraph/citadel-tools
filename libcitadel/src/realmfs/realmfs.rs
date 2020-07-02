@@ -130,11 +130,10 @@ impl RealmFS {
 
     /// Return an Error result if name is not valid.
     fn validate_name(name: &str) -> Result<()> {
-        if Self::is_valid_name(name) {
-            Ok(())
-        } else {
-            Err(format_err!("Invalid realm name '{}'", name))
+        if !Self::is_valid_name(name) {
+            bail!("Invalid realm name '{}'", name);
         }
+        Ok(())
     }
 
     /// Return `true` if `name` is a valid name for a RealmFS.
@@ -211,11 +210,10 @@ impl RealmFS {
         let path = self.path_with_extension("notes");
         let notes = notes.as_ref();
         if path.exists() && notes.is_empty() {
-            fs::remove_file(path)?;
+            util::remove_file(&path)
         } else {
-            fs::write(path, notes)?;
+            util::write_file(&path, notes)
         }
-        Ok(())
     }
 
     /// Return `MetaInfo` from image header of this RealmFS.
@@ -353,7 +351,8 @@ impl RealmFS {
 
     // Return the length in blocks of the actual image file on disk
     pub fn file_nblocks(&self) -> Result<usize> {
-        let meta = self.path.metadata()?;
+        let meta = self.path.metadata()
+            .map_err(context!("failed to read metadata from realmfs image file {:?}", self.path))?;
         let len = meta.len() as usize;
         if len % 4096 != 0 {
             bail!("realmfs image file '{}' has size which is not a multiple of block size", self.path.display());
@@ -397,7 +396,8 @@ impl RealmFS {
     }
 
     pub fn allocated_size_blocks(&self) -> Result<usize> {
-        let meta = self.path().metadata()?;
+        let meta = self.path().metadata()
+            .map_err(context!("failed to read metadata from realmfs image file {:?}", self.path()))?;
         Ok(meta.blocks() as usize / 8)
     }
 

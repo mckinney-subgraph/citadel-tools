@@ -207,7 +207,7 @@ impl ConfigDialog {
 
         let path = self.realm.base_path_file("config");
 
-        if let Err(e) = self.realm.config().write_config(&path) {
+        if let Err(e) = self.realm.config().write_to(&path) {
             warn!("Error writing config file {}: {}", path.display(), e);
         }
         info!("Config file written to {}", path.display());

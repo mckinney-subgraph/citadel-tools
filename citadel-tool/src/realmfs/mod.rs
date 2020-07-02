@@ -7,7 +7,6 @@ use clap::SubCommand;
 use clap::AppSettings::*;
 use clap::Arg;
 use libcitadel::ResizeSize;
-use libcitadel::format_error;
 use std::process::exit;
 
 pub fn main(args: Vec<String>) {
@@ -87,7 +86,7 @@ is the final absolute size of the image.")
     };
 
     if let Err(ref e) = result {
-        eprintln!("Error: {}", format_error(e));
+        eprintln!("Error: {}", e);
         exit(1);
     }
 }
@@ -125,12 +124,13 @@ fn parse_resize_size(s: &str) -> Result<ResizeSize> {
         .parse::<usize>()
         .map_err(|_| format_err!("Unable to parse size value '{}'",s))?;
 
-    match unit {
-        Some('g') | Some('G') => Ok(ResizeSize::gigs(size)),
-        Some('m') | Some('M') => Ok(ResizeSize::megs(size)),
-        Some(c) => Err(format_err!("Unknown size unit '{}'", c)),
-        None => Ok(ResizeSize::blocks(size)),
-    }
+    let sz = match unit {
+        Some('g') | Some('G') => ResizeSize::gigs(size),
+        Some('m') | Some('M') => ResizeSize::megs(size),
+        Some(c) => bail!("Unknown size unit '{}'", c),
+        None => ResizeSize::blocks(size),
+    };
+    Ok(sz)
 }
 
 fn resize(arg_matches: &ArgMatches) -> Result<()> {

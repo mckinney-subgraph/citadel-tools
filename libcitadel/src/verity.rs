@@ -1,9 +1,9 @@
 use std::path::{Path,PathBuf};
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions,File};
+use std::fs::{OpenOptions,File};
 use std::io;
 
-use crate::{Result, MetaInfo, Partition, LoopDevice, ImageHeader};
+use crate::{Result, MetaInfo, Partition, LoopDevice, ImageHeader, util};
 use std::sync::Arc;
 
 
@@ -42,21 +42,25 @@ impl Verity {
         let verityfile = self.image.with_extension("verity");
 
         // Make sure file size is correct or else verity tree will be appended in wrong place
-        let meta = self.image.metadata()?;
+        let meta = self.image.metadata()
+            .map_err(context!("failed to read metadata from image file {:?}", self.image))?;
         let len = meta.len() as usize;
         let expected = (nblocks + 1) * 4096;
         if len != expected {
-            bail!("Actual file size ({}) does not match expected size ({})", len, expected);
+            bail!("actual file size ({}) does not match expected size ({})", len, expected);
         }
         let vout = LoopDevice::with_loop(self.path(), Some(4096), true, |loopdev| {
             let output = cmd_with_output!(Self::VERITYSETUP, "--data-blocks={} --salt={} format {} {}",
                 nblocks, salt, loopdev, verityfile.display())?;
             Ok(VerityOutput::parse(&output))
         })?;
-        let mut input = File::open(&verityfile)?;
-        let mut output = OpenOptions::new().append(true).open(self.path())?;
-        io::copy(&mut input, &mut output)?;
-        fs::remove_file(&verityfile)?;
+        let mut input = File::open(&verityfile)
+            .map_err(context!("failed to open temporary verity hashtree file {:?}", verityfile))?;
+        let mut output = OpenOptions::new().append(true).open(self.path())
+            .map_err(context!("failed to open image file {:?}", self.path()))?;
+        io::copy(&mut input, &mut output)
+            .map_err(context!("i/o error copying verity hashtree to image file"))?;
+        util::remove_file(&verityfile)?;
         Ok(vout)
     }
 
@@ -104,9 +108,7 @@ impl Verity {
         let nblocks = metainfo.nblocks();
         let verity_root = metainfo.verity_root();
         cmd!(Self::VERITYSETUP, "--hash-offset={} --data-blocks={} create {} {} {} {}",
-            nblocks * 4096, nblocks, devname, srcdev, srcdev, verity_root)?;
-
-        Ok(())
+            nblocks * 4096, nblocks, devname, srcdev, srcdev, verity_root)
     }
 
     fn path(&self) -> &Path {

@@ -1,9 +1,7 @@
-use std::fs;
-use std::fmt::Write;
-
-use crate::{Realm,Result};
+use std::fmt::{self,Write};
 use std::path::{Path, PathBuf};
-use crate::realm::network::NetworkConfig;
+
+use crate::{Realm, Result, util, realm::network::NetworkConfig};
 
 const NSPAWN_FILE_TEMPLATE: &str = "\
 [Exec]
@@ -77,15 +75,8 @@ impl <'a> RealmLauncher <'a> {
     }
 
     pub fn remove_launch_config_files(&self) -> Result<()> {
-        let nspawn_path = self.realm_nspawn_path();
-        if nspawn_path.exists() {
-            fs::remove_file(&nspawn_path)?;
-        }
-        let service_path = self.realm_service_path();
-        if service_path.exists() {
-            fs::remove_file(&service_path)?;
-        }
-        Ok(())
+        util::remove_file(self.realm_nspawn_path())?;
+        util::remove_file(self.realm_service_path())
     }
 
     pub fn write_launch_config_files(&mut self, rootfs: &Path, netconfig: &mut NetworkConfig) -> Result<()> {
@@ -94,15 +85,11 @@ impl <'a> RealmLauncher <'a> {
         }
         let nspawn_path = self.realm_nspawn_path();
         let nspawn_content = self.generate_nspawn_file(netconfig)?;
-        self.write_launch_config_file(&nspawn_path, &nspawn_content)
-            .map_err(|e| format_err!("failed to write nspawn config file {}: {}", nspawn_path.display(), e))?;
+        self.write_launch_config_file(&nspawn_path, &nspawn_content)?;
 
         let service_path = self.realm_service_path();
         let service_content = self.generate_service_file(rootfs);
         self.write_launch_config_file(&service_path, &service_content)
-            .map_err(|e| format_err!("failed to write service config file {}: {}", service_path.display(), e))?;
-
-        Ok(())
     }
 
     pub fn realm_service_name(&self) -> &str {
@@ -113,15 +100,10 @@ impl <'a> RealmLauncher <'a> {
     /// not already exist, create it.
     fn write_launch_config_file(&self, path: &Path, content: &str) -> Result<()> {
         match path.parent() {
-            Some(parent) => {
-                if !parent.exists() {
-                    fs::create_dir_all(parent)?;
-                }
-            },
+            Some(parent) => util::create_dir(parent)?,
             None => bail!("config file path {} has no parent?", path.display()),
         };
-        fs::write(path, content)?;
-        Ok(())
+        util::write_file(path, content)
     }
 
     fn generate_nspawn_file(&mut self, netconfig: &mut NetworkConfig) -> Result<String> {
@@ -237,5 +219,11 @@ impl <'a> RealmLauncher <'a> {
 
     fn realm_nspawn_path(&self) -> PathBuf {
         PathBuf::from(SYSTEMD_NSPAWN_PATH).join(format!("{}.nspawn", self.realm.name()))
+    }
+}
+
+impl From<fmt::Error> for crate::Error {
+    fn from(e: fmt::Error) -> Self {
+        format_err!("Error formatting string: {}", e).into()
     }
 }

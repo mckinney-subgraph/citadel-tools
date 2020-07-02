@@ -1,8 +1,7 @@
-use std::process::Command;
+use std::path::Path;
+use std::process::{Command,Stdio};
 
 use libcitadel::{BlockDev, ResourceImage, CommandLine, ImageHeader, Partition, Result, LoopDevice};
-use std::path::Path;
-use std::process::Stdio;
 use libcitadel::verity::Verity;
 
 pub fn setup_rootfs() -> Result<()> {
@@ -45,11 +44,11 @@ fn setup_partition_verified(p: &mut Partition) -> Result<()> {
     info!("Creating /dev/mapper/rootfs dm-verity device");
     if !CommandLine::nosignatures() {
         if !p.has_public_key() {
-            bail!("No public key available for channel {}", p.metainfo().channel())
+            bail!("no public key available for channel {}", p.metainfo().channel())
         }
         if !p.is_signature_valid() {
             p.write_status(ImageHeader::STATUS_BAD_SIG)?;
-            bail!("Signature verification failed on partition");
+            bail!("signature verification failed on partition");
         }
         info!("Image signature is valid for channel {}", p.metainfo().channel());
     }
@@ -71,7 +70,7 @@ fn setup_linear_mapping(blockdev: &Path) -> Result<()> {
         .success();
 
     if !ok {
-        bail!("Failed to set up linear identity mapping with /usr/sbin/dmsetup");
+        bail!("failed to set up linear identity mapping with /usr/sbin/dmsetup");
     }
     Ok(())
 }
@@ -89,7 +88,7 @@ fn choose_boot_partiton(scan: bool) -> Result<Partition> {
     for p in partitions {
         best = compare_boot_partitions(best, p);
     }
-    best.ok_or_else(|| format_err!("No partition found to boot from"))
+    best.ok_or_else(|| format_err!("No partition found to boot from").into())
 }
 
 fn compare_boot_partitions(a: Option<Partition>, b: Partition) -> Option<Partition> {

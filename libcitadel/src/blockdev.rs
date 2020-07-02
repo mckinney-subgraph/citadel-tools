@@ -1,9 +1,9 @@
-use std::path::Path;
-use std::fs::File;
+use std::fs::{File,OpenOptions};
 use std::io::{Read,Write,Seek,SeekFrom};
 use std::os::unix::io::AsRawFd;
-use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+
 use libc;
 
 use crate::Result;
@@ -112,7 +112,8 @@ impl BlockDev {
             oo.write(true);
         }
         let file = oo.open(path)
-            .map_err(|e| format_err!("Failed to open block device {}: {}", path.display(), e))?;
+            .map_err(context!("failed to open block device {:?}", path))?;
+
         Ok(BlockDev{file})
     }
 
@@ -121,7 +122,7 @@ impl BlockDev {
         let mut sz = 0u64;
         unsafe {
             blk_getsize64(self.file.as_raw_fd(), &mut sz)
-                .map_err(|e| format_err!("Error calling getsize ioctl on block device: {}", e))?;
+                .map_err(context!("error calling getsize ioctl on block device"))?;
         }
         Ok(sz)
     }
@@ -138,16 +139,18 @@ impl BlockDev {
     fn setup_io(&mut self, offset: usize, buffer: &[u8]) -> Result<()> {
         let addr = buffer.as_ptr() as usize;
         if addr & ALIGNMENT_MASK != 0 {
-            bail!("block device i/o attempted with incorrectly aligned buffer: {:p}", buffer);
+            bail!("block device I/O attempted with incorrectly aligned buffer address: {:#x}", addr);
         }
         if buffer.len() % SECTOR_SIZE != 0 {
-            bail!("buffer length {} is not a multiple of sector size", buffer.len());
+            bail!("buffer length ({}) is not a multiple of sector size", buffer.len());
         }
         let count = buffer.len() / SECTOR_SIZE;
         if offset + count > self.nsectors()? {
-            bail!("sector_io({}, {}) is past end of device", offset, buffer.len());
+            bail!("block device sector i/o ({},{}) is past end of device", offset, buffer.len());
         }
-        self.file.seek(SeekFrom::Start((offset * SECTOR_SIZE) as u64))?;
+        self.file.seek(SeekFrom::Start((offset * SECTOR_SIZE) as u64))
+            .map_err(context!("I/O error accessing block device"))?;
+
         Ok(())
     }
 
@@ -155,16 +158,15 @@ impl BlockDev {
     /// The buffer must be a multiple of sector size (512 bytes).
     pub fn read_sectors(&mut self, offset: usize, buffer: &mut [u8]) -> Result<()> {
         self.setup_io(offset, buffer)?;
-        self.file.read_exact(buffer)?;
-        Ok(())
+        self.file.read_exact(buffer)
+            .map_err(context!("I/O error reading from block device"))
     }
 
     /// Write sectors from `buffer` to device starting at sector `offset`.
     /// The buffer must be a multiple of sector size (512 bytes).
     pub fn write_sectors(&mut self, offset: usize, buffer: &[u8]) -> Result<()> {
         self.setup_io(offset, buffer)?;
-        self.file.write_all(buffer)?;
-        Ok(())
+        self.file.write_all(buffer)
+            .map_err(context!("I/O error writing to block device"))
     }
-
 }

@@ -1,8 +1,7 @@
 use std::path::Path;
 use std::collections::HashMap;
-use std::fs;
 
-use crate::Result;
+use crate::{Result, util};
 
 lazy_static! {
     static ref OS_RELEASE: Option<OsRelease> = match OsRelease::load() {
@@ -26,12 +25,13 @@ impl OsRelease {
                 return OsRelease::load_file(path);
             }
         }
-        Err(format_err!("File not found"))
+        bail!("failed to find os-release file")
     }
 
     fn load_file(path: &Path) -> Result<OsRelease> {
         let mut vars = HashMap::new();
-        for line in fs::read_to_string(path)?.lines() {
+        let content = util::read_to_string(path)?;
+        for line in content.lines() {
             let (k,v) = OsRelease::parse_line(line)?;
             vars.insert(k,v);
         }
@@ -52,7 +52,7 @@ impl OsRelease {
         for q in &["'", "\""] {
             if s.starts_with(q) {
                 if !s.ends_with(q) || s.len() < 2 {
-                    bail!("Unmatched quote character");
+                    bail!("unmatched quote character in line: {}", s);
                 }
                 return Ok(s[1..s.len() - 1].to_string());
             }

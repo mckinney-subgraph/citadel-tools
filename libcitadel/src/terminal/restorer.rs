@@ -54,19 +54,20 @@ impl TerminalRestorer {
         let mut t = self.terminal()?;
         let mut palette = TerminalPalette::default();
         palette.load(&mut t)
-            .map_err(|e| format_err!("error reading palette colors from terminal: {}", e))?;
+            .map_err(context!("error reading palette colors from terminal"))?;
         Ok(palette)
     }
 
     fn apply_palette(&self, palette: &TerminalPalette) -> Result<()> {
         let mut t = self.terminal()?;
         palette.apply(&mut t)
-            .map_err(|e| format_err!("error setting palette on terminal: {}", e))
+            .map_err(context!("error setting palette on terminal"))?;
+        Ok(())
     }
 
     fn terminal(&self) -> Result<AnsiTerminal> {
         AnsiTerminal::new()
-            .map_err(|e| format_err!("failed to create AnsiTerminal: {}", e))
+            .map_err(context!("failed to create AnsiTerminal"))
     }
 
     pub fn apply_base16_by_slug<S: AsRef<str>>(&self, slug: S) {
@@ -84,11 +85,10 @@ impl TerminalRestorer {
     fn apply_base16(&self, scheme: &Base16Scheme) -> Result<()> {
         let mut t = self.terminal()?;
         t.apply_base16(scheme)
-            .map_err(|e| format_err!("error setting base16 palette colors: {}", e))?;
+            .map_err(context!("error setting base16 palette colors"))?;
         t.clear_screen()
-            .map_err(|e| format_err!("error clearing screen: {}", e))
+            .map_err(context!("error clearing screen"))
     }
-
 }
 
 impl Drop for TerminalRestorer {

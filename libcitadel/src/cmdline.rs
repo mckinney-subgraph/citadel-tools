@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::fs;
 
-use crate::Result;
+use crate::{Result, util};
 
 lazy_static! {
     static ref CMDLINE: CommandLine = match CommandLine::load() {
@@ -109,7 +108,7 @@ impl CommandLine {
     }
 
     fn load() -> Result<Self> {
-        let s = fs::read_to_string("/proc/cmdline")?;
+        let s = util::read_to_string("/proc/cmdline")?;
         let varmap = CommandLineParser::new(s).parse();
         Ok(CommandLine{varmap})
     }
@@ -289,7 +288,6 @@ fn foo() {
     let cline = CommandLine::load().unwrap();
     println!("hello");
     println!("cline: {:?}", cline.varmap);
-
 }
 
 

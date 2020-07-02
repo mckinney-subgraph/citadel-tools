@@ -3,7 +3,7 @@ use std::io::{Error,ErrorKind};
 use std::os::unix::io::AsRawFd;
 use std::path::{Path,PathBuf};
 
-use crate::Result;
+use crate::{Result, util};
 
 ///
 /// Create a lockfile and acquire an exclusive lock with flock(2)
@@ -45,9 +45,7 @@ impl FileLock {
 
     fn open_lockfile(path: &Path) -> Result<File> {
         if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
+            util::create_dir(parent)?;
         }
 
         // Make a few attempts just in case we try to open lockfile
@@ -61,14 +59,14 @@ impl FileLock {
                 return Ok(file);
             }
         }
-        Err(format_err!("unable to open lockfile {}", path.display() ))
+        bail!("unable to open lockfile {:?}", path)
     }
 
     fn try_create_lockfile(path: &Path) -> Result<Option<File>> {
         match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(file) => Ok(Some(file)),
             Err(ref e) if e.kind() == ErrorKind::AlreadyExists => Ok(None),
-            Err(e) => Err(e.into()),
+            Err(e) => bail!("failed to create lockfile {:?}: {}", path, e),
         }
     }
 
@@ -76,7 +74,7 @@ impl FileLock {
         match File::open(path) {
             Ok(file) => Ok(Some(file)),
             Err(ref e) if e.kind() == ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e.into()),
+            Err(e) => bail!("failed to open lockfile {:?}: {}", path, e),
         }
     }
 
@@ -99,7 +97,7 @@ impl FileLock {
             if !block && errno == libc::EWOULDBLOCK {
                 return Ok(false);
             }
-            return Err(Error::from_raw_os_error(errno).into());
+            bail!("error calling flock(): {}", Error::from_raw_os_error(errno));
         }
         Ok(true)
     }

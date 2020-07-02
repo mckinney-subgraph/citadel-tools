@@ -5,10 +5,11 @@ use std::path::Path;
 use toml;
 
 use crate::blockdev::AlignedBuffer;
-use crate::{BlockDev,Result,public_key_for_channel,PublicKey};
+use crate::{Result, BlockDev, public_key_for_channel, PublicKey};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::sync::atomic::{Ordering,AtomicIsize};
 use std::os::unix::fs::MetadataExt;
+use std::io;
 
 /// Expected magic value in header
 const MAGIC: &[u8] = b"SGOS";
@@ -159,6 +160,9 @@ impl ImageHeader {
     /// Reload header if file has changed on disk
     pub fn reload_if_stale<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
         let path = path.as_ref();
+        if !path.exists() {
+            bail!("cannot reload header because image file {:?} is missing", path);
+        }
         let reload = self.is_stale(path)?;
         if reload {
             self.reload_file(path)?;
@@ -185,9 +189,11 @@ impl ImageHeader {
         let path = path.as_ref();
         let (size,ts) = Self::file_metadata(path)?;
         if size < Self::HEADER_SIZE {
-            bail!("Cannot load image header because {} has a size of {}", path.display(), size);
+            bail!("cannot load image header from {:?} because file is too short ({})", path, size);
         }
-        let mut f = File::open(path)?;
+        let mut f = File::open(path)
+            .map_err(context!("failed to load image header from {:?}", path))?;
+
         let mut header = Self::from_reader(&mut f)?;
         *header.timestamp.get_mut() = ts;
         Ok(header)
@@ -195,13 +201,15 @@ impl ImageHeader {
 
     // returns tuple of (size,mtime)
     fn file_metadata(path: &Path) -> Result<(usize, isize)> {
-        let metadata = path.metadata()?;
+        let metadata = path.metadata()
+            .map_err(context!("failed to load image header from {:?}", path))?;
         Ok((metadata.len() as usize, metadata.mtime() as isize))
     }
 
     pub fn from_reader<R: Read>(r: &mut R) -> Result<Self> {
         let mut v = vec![0u8; Self::HEADER_SIZE];
-        r.read_exact(&mut v)?;
+        r.read_exact(&mut v)
+            .map_err(context!("error reading header bytes"))?;
         Self::from_slice(&v)
     }
 
@@ -218,12 +226,9 @@ impl ImageHeader {
     pub fn from_partition<P: AsRef<Path>>(path: P) -> Result<Self> {
         let mut dev = BlockDev::open_ro(path.as_ref())?;
         let nsectors = dev.nsectors()?;
-        ensure!(
-            nsectors >= 8,
-            "{} is a block device bit it's too short ({} sectors)",
-            path.as_ref().display(),
-            nsectors
-        );
+        if nsectors < 8 {
+            bail!("cannot load/store header from block device {:?} because it's too short ({} sectors)", path.as_ref(), nsectors);
+        }
         let mut buffer = AlignedBuffer::new(Self::HEADER_SIZE);
         dev.read_sectors(nsectors - 8, buffer.as_mut())?;
         Self::from_slice(buffer.as_ref())
@@ -232,12 +237,9 @@ impl ImageHeader {
     pub fn write_partition<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut dev = BlockDev::open_rw(path.as_ref())?;
         let nsectors = dev.nsectors()?;
-        ensure!(
-            nsectors >= 8,
-            "{} is a block device bit it's too short ({} sectors)",
-            path.as_ref().display(),
-            nsectors
-        );
+        if nsectors < 8 {
+            bail!("cannot load/store header from block device {:?} because it's too short ({} sectors)", path.as_ref(), nsectors);
+        }
         let lock = self.bytes();
         let buffer = AlignedBuffer::from_slice(&lock.0);
         dev.write_sectors(nsectors - 8, buffer.as_ref())?;
@@ -273,7 +275,7 @@ impl ImageHeader {
         let mut lock = self.metainfo.lock().unwrap();
         let mb = self.metainfo_bytes();
         let metainfo = MetaInfo::parse_bytes(&mb)
-            .ok_or_else(|| format_err!("ImageHeader has invalid metainfo"))?;
+            .ok_or(format_err!("image header has invalid metainfo"))?;
         *lock = Some(Arc::new(metainfo));
         Ok(())
     }
@@ -335,13 +337,13 @@ impl ImageHeader {
 
     pub fn update_metainfo<P: AsRef<Path>>(&self, metainfo_bytes: &[u8], signature: &[u8], path: P) -> Result<()> {
         self.set_metainfo_bytes(metainfo_bytes)?;
-        self.set_signature(signature)?;
+        self.set_signature(signature);
         self.write_header_to(path)
     }
 
     pub fn set_metainfo_bytes(&self, bytes: &[u8]) -> Result<()> {
         let metainfo = MetaInfo::parse_bytes(bytes)
-            .ok_or_else(|| format_err!("Could not parse metainfo bytes as valid metainfo document"))?;
+            .ok_or(format_err!("cannot parse header metainfo bytes as a valid metainfo document"))?;
 
         let mut lock = self.metainfo.lock().unwrap();
         self.with_bytes_mut(|bs| {
@@ -369,18 +371,15 @@ impl ImageHeader {
         self.read_bytes(METAINFO_OFFSET + mlen, SIGNATURE_LENGTH)
     }
 
-    pub fn set_signature(&self, signature: &[u8]) -> Result<()> {
-        if signature.len() != SIGNATURE_LENGTH {
-            bail!("Signature has invalid length: {}", signature.len());
-        }
+    pub fn set_signature(&self, signature: &[u8]) {
+        assert_eq!(signature.len(), SIGNATURE_LENGTH, "Signature has invalid length");
         let mlen = self.metainfo_len();
         self.write_bytes(8 + mlen, signature);
-        Ok(())
     }
 
-    pub fn clear_signature(&self) -> Result<()> {
+    pub fn clear_signature(&self) {
         let zeros = vec![0u8; SIGNATURE_LENGTH];
-        self.set_signature(&zeros)
+        self.set_signature(&zeros);
     }
 
     pub fn public_key(&self) -> Result<Option<PublicKey>> {
@@ -391,13 +390,16 @@ impl ImageHeader {
         pubkey.verify(&self.metainfo_bytes(), &self.signature())
     }
 
-    pub fn write_header<W: Write>(&self, mut writer: W) -> Result<()> {
-        self.with_bytes(|bs| writer.write_all(&bs.0))?;
-        Ok(())
+    pub fn write_header<W: Write>(&self, mut writer: W) -> io::Result<()> {
+        self.with_bytes(|bs| writer.write_all(&bs.0))
     }
 
     pub fn write_header_to<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        self.write_header(OpenOptions::new().write(true).open(path.as_ref())?)
+        let path = path.as_ref();
+        let w = OpenOptions::new().write(true).open(path)
+            .map_err(context!("failed to open image file {:?} to write header", path))?;
+        self.write_header(w)
+            .map_err(context!("error writing header to image file {:?}", path))
     }
 
     fn read_u8(&self, idx: usize) -> u8 {
