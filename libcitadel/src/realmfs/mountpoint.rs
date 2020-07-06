@@ -25,16 +25,29 @@ impl Mountpoint {
     const MOUNT: &'static str = "/usr/bin/mount";
     const UMOUNT: &'static str = "/usr/bin/umount";
 
+    fn path_is_mountpoint(path: &Path) -> bool {
+        // path begins with /run/citadel/realmfs
+        path.starts_with(RealmFS::RUN_DIRECTORY) &&
+            // path has a filename with extension 'mountpoint'
+            path.extension().map_or(false, |ext| ext == "mountpoint") &&
+            // path has a filename and that name starts with "realmfs-"
+            path.file_name().and_then(OsStr::to_str).map_or(false, |name| name.starts_with("realmfs-")) &&
+            // path filename can be parsed correctly
+            Self::parse_filename(path).is_some()
+    }
+
     /// Read `RealmFS::RUN_DIRECTORY` to collect all current mountpoints
     /// and return them.
     pub fn all_mountpoints() -> Result<Vec<Mountpoint>> {
-        let all = fs::read_dir(RealmFS::RUN_DIRECTORY)
-            .map_err(context!("error reading realmfs run directory {}", RealmFS::RUN_DIRECTORY))?
-            .flat_map(|e| e.ok())
-            .map(Into::into)
-            .filter(Mountpoint::is_valid)
-            .collect();
-        Ok(all)
+        let mut v = Vec::new();
+        util::read_directory(RealmFS::RUN_DIRECTORY, |dent| {
+            let path = dent.path();
+            if Self::path_is_mountpoint(&path) {
+                v.push(Mountpoint(path));
+            }
+            Ok(())
+        })?;
+        Ok(v)
     }
 
     /// Build a new `Mountpoint` from the provided realmfs `name` and `tag`.
@@ -58,10 +71,9 @@ impl Mountpoint {
     }
 
     fn mount<P: AsRef<Path>>(&self, source: P) -> Result<()> {
-        cmd!(Self::MOUNT, "-oro {} {}",
-            source.as_ref().display(),
-            self.path().display()
-        )
+        let source = source.as_ref();
+        cmd!(Self::MOUNT, "-oro {} {}", source.display(), self.path().display())
+            .map_err(context!("failed to mount {:?} to {:?}", source, self.path()))
     }
 
     pub fn activate(&self, realmfs: &RealmFS) -> Result<()> {
@@ -135,7 +147,6 @@ impl Mountpoint {
         if let Err(err) = fs::remove_dir(self.path()) {
             warn!("Failed to remove mountpoint directory {}: {}", self, err);
         }
-
     }
 
     fn verity_device_path(&self) -> PathBuf {
@@ -145,6 +156,7 @@ impl Mountpoint {
 
     // Return the name of the dm-verity device associated with this mountpoint
     pub fn verity_device(&self) -> String {
+        info!("realmfs: {} tag: {}", self.realmfs(), self.tag());
         format!("verity-realmfs-{}-{}", self.realmfs(), self.tag())
     }
 
@@ -155,39 +167,35 @@ impl Mountpoint {
 
     /// Name of RealmFS extracted from structure of directory filename.
     pub fn realmfs(&self) -> &str {
-        self.field(1)
+        self.filename_fields().0
     }
 
     /// Tag field extracted from structure of directory filename.
     pub fn tag(&self) -> &str {
-        self.field(2)
-    }
-
-    fn field(&self, n: usize) -> &str {
-        Self::filename_fields(self.path())
-            .and_then(|mut fields| fields.nth(n))
-            .unwrap_or_else(|| panic!("Failed to access field {} of mountpoint {}", n, self))
+        self.filename_fields().1
     }
 
     /// Return `true` if this instance is a `&Path` in `RealmFS::RUN_DIRECTORY` and
     /// the filename has the expected structure.
     pub fn is_valid(&self) -> bool {
-        self.path().starts_with(RealmFS::RUN_DIRECTORY) && self.has_valid_extention() &&
-            Self::filename_fields(self.path()).map(|it| it.count() == 3).unwrap_or(false)
+        Self::path_is_mountpoint(self.path())
     }
 
-    fn has_valid_extention(&self) -> bool {
-        self.path().extension().map_or(false, |e| e == "mountpoint")
+    fn filename_fields(&self) -> (&str, &str) {
+        Self::parse_filename(self.path())
+            .expect(&format!("failed to parse mountpoint filename {:?} into fields", self.path()))
     }
 
-    fn filename_fields(path: &Path) -> Option<impl Iterator<Item=&str>> {
-        Self::filename(path).map(|name| name.split('-'))
-    }
-
-    fn filename(path: &Path) -> Option<&str> {
-        path.file_name()
+    fn parse_filename(path: &Path) -> Option<(&str,&str)> {
+        let fname = path.file_name()
             .and_then(OsStr::to_str)
-            .map(|s| s.trim_end_matches(".mountpoint"))
+            .map(|s|
+                s.trim_end_matches(".mountpoint")
+                    .trim_start_matches("realmfs-")
+            )?;
+        let idx = fname.rfind("-")?;
+        let (first,last) = fname.split_at(idx);
+        Some((first, &last[1..]))
     }
 }
 
