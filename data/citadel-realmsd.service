@@ -1,0 +1,8 @@
+[Unit]
+Description=Realms Manager Daemon
+
+[Service]
+ExecStart=/usr/libexec/citadel-realmsd
+
+[Install]
+WantedBy=multi-user.target
