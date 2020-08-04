@@ -24,10 +24,11 @@ impl Verity {
         })
     }
 
-    pub fn generate_initial_hashtree(&self, output: impl AsRef<Path>) -> Result<VerityOutput> {
+    pub fn generate_initial_hashtree(image: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<VerityOutput> {
+        let image = image.as_ref();
         let output = output.as_ref();
         // Don't use absolute path to veritysetup so that the build will correctly find the version from cryptsetup-native
-        let output = cmd_with_output!("veritysetup", "format {} {}", self.path_str(), output.display())?;
+        let output = cmd_with_output!("veritysetup", "format {:?} {}", image.display(), output.display())?;
         Ok(VerityOutput::parse(&output))
     }
 
@@ -113,10 +114,6 @@ impl Verity {
 
     fn path(&self) -> &Path {
         &self.image
-    }
-
-    fn path_str(&self) -> &str {
-        self.image.to_str().unwrap()
     }
 }
 
