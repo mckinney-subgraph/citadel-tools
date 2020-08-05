@@ -293,6 +293,8 @@ impl InotifyEventListener {
             .map_err(context!("inotify initialization failed"))?;
         let realms_watch = inotify.add_watch("/realms", WatchMask::MOVED_FROM|WatchMask::MOVED_TO)
             .map_err(context!("error adding watch for /realms to inotify"))?;
+
+        util::create_dir("/run/citadel/realms/current")?;
         let current_watch = inotify.add_watch("/run/citadel/realms/current", WatchMask::CREATE|WatchMask::MOVED_TO)
             .map_err(context!("error adding watch for /run/citadel/realms/current to inotify"))?;
 
