@@ -28,7 +28,7 @@ impl Verity {
         let image = image.as_ref();
         let output = output.as_ref();
         // Don't use absolute path to veritysetup so that the build will correctly find the version from cryptsetup-native
-        let output = cmd_with_output!("veritysetup", "format {:?} {}", image.display(), output.display())?;
+        let output = cmd_with_output!("veritysetup", "format {} {}", image.display(), output.display())?;
         Ok(VerityOutput::parse(&output))
     }
 
