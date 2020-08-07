@@ -116,7 +116,7 @@ impl Mountpoint {
         let verity = Verity::new(realmfs.path())?;
         verity.generate_image_hashtree()?;
         realmfs.header().set_flag(ImageHeader::FLAG_HASH_TREE);
-        realmfs.header().write_header_to(self.path())?;
+        realmfs.header().write_header_to(realmfs.path())?;
         info!("Done generating verity hash tree");
         Ok(())
     }
