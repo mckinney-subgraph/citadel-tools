@@ -5,6 +5,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
+use pwhash::sha512_crypt;
 
 use libcitadel::util;
 use libcitadel::RealmFS;
@@ -121,20 +122,23 @@ pub struct Installer {
     install_syslinux: bool,
     storage_base: PathBuf,
     target_device: Option<PathBuf>,
+    citadel_passphrase: Option<String>,
     passphrase: Option<String>,
     artifact_directory: String,
     logfile: Option<RefCell<File>>,
 }
 
 impl Installer {
-    pub fn new<P: AsRef<Path>>(target_device: P, passphrase: &str) -> Installer {
+    pub fn new<P: AsRef<Path>>(target_device: P, citadel_passphrase: &str, passphrase: &str) -> Installer {
         let target_device = Some(target_device.as_ref().to_owned());
+        let citadel_passphrase = Some(citadel_passphrase.to_owned());
         let passphrase = Some(passphrase.to_owned());
         Installer {
             _type: InstallType::Install,
             install_syslinux: true,
             storage_base: PathBuf::from(INSTALL_MOUNT),
             target_device,
+            citadel_passphrase,
             passphrase,
             artifact_directory: DEFAULT_ARTIFACT_DIRECTORY.to_string(),
             logfile: None,
@@ -147,6 +151,7 @@ impl Installer {
             install_syslinux: false,
             storage_base: PathBuf::from("/sysroot/storage"),
             target_device: None,
+            citadel_passphrase: None,
             passphrase: None,
             artifact_directory: DEFAULT_ARTIFACT_DIRECTORY.to_string(),
             logfile: None,
@@ -159,6 +164,10 @@ impl Installer {
 
     fn target_str(&self) -> &str {
         self.target().to_str().unwrap()
+    }
+
+    fn citadel_passphrase(&self) -> &str {
+        self.citadel_passphrase.as_ref().expect("No citadel passphrase")
     }
 
     fn passphrase(&self) -> &str {
@@ -251,14 +260,14 @@ impl Installer {
         Ok(())
     }
 
-    fn partition_disk(&self) -> Result<()> {
+    pub fn partition_disk(&self) -> Result<()> {
         self.header("Partitioning target disk")?;
         self.cmd_list(PARTITION_COMMANDS, &[
             ("$TARGET", self.target_str())
         ])
     }
 
-    fn setup_luks(&self) -> Result<()> {
+    pub fn setup_luks(&self) -> Result<()> {
         self.header("Setting up LUKS disk encryption")?;
         util::create_dir(INSTALL_MOUNT)?;
         util::write_file(LUKS_PASSPHRASE_FILE, self.passphrase().as_bytes())?;
@@ -274,12 +283,12 @@ impl Installer {
         util::remove_file(LUKS_PASSPHRASE_FILE)
     }
 
-    fn setup_lvm(&self) -> Result<()> {
+    pub fn setup_lvm(&self) -> Result<()> {
         self.header("Setting up LVM volumes")?;
         self.cmd_list(LVM_COMMANDS, &[])
     }
 
-    fn setup_boot(&self) -> Result<()> {
+    pub fn setup_boot(&self) -> Result<()> {
         self.header("Setting up /boot partition")?;
         let boot_partition = self.target_partition(1);
         self.cmd(format!("/sbin/mkfs.vfat -F 32 {}", boot_partition))?;
@@ -327,9 +336,11 @@ impl Installer {
             util::copy_file(dent.path(), dst.join(dent.file_name()))
         })?;
 
+        let kernel_version = self.kernel_version();
         self.info("Writing syslinux.cfg")?;
         util::write_file(dst.join("syslinux.cfg"),
-                  SYSLINUX_CONF.replace("$KERNEL_CMDLINE", KERNEL_CMDLINE))?;
+                  SYSLINUX_CONF.replace("$KERNEL_CMDLINE", KERNEL_CMDLINE)
+                  .replace("$KERNEL_VERSION", &kernel_version))?;
         self.cmd(format!("/sbin/extlinux --install {}", dst.display()))
     }
 
@@ -343,7 +354,7 @@ impl Installer {
 
     }
 
-    fn create_storage(&self) -> Result<()> {
+    pub fn create_storage(&self) -> Result<()> {
         self.header("Setting up /storage partition")?;
 
         self.cmd_list(CREATE_STORAGE_COMMANDS,
@@ -363,6 +374,7 @@ impl Installer {
         self.setup_realm_skel()?;
         self.setup_main_realm()?;
         self.setup_apt_cacher_realm()?;
+        self.setup_citadel_passphrase()?;
 
         self.info("Creating global realm config file")?;
         util::write_file(self.storage().join("realms/config"), self.global_realm_config())?;
@@ -381,6 +393,7 @@ impl Installer {
         let keyring = KeyRing::create_new();
         keyring.write(self.storage().join("keyring"), self.passphrase.as_ref().unwrap())
     }
+
 
     fn setup_base_realmfs(&self) -> Result<()> {
         let realmfs_dir = self.storage().join("realms/realmfs-images");
@@ -460,14 +473,37 @@ impl Installer {
         self.sparse_copy_artifact(&kernel_img, &resources)
     }
 
-    fn install_rootfs_partitions(&self) -> Result<()> {
+    fn setup_citadel_passphrase(&self) -> Result<()> {
+        if self._type == InstallType::LiveSetup {
+            self.info("Creating temporary citadel passphrase file for live mode")?;
+            let path = self.storage().join("citadel-state/passwd");
+            if !path.exists() {
+                if let Ok(hash) = sha512_crypt::hash("citadel") {
+                    let contents = format!("citadel:{}\n", hash);
+                    util::create_dir(self.storage().join("citadel-state"))?;
+                    util::write_file(self.storage().join("citadel-state/passwd"), contents)?;
+                }
+            }
+        }
+        else if self._type == InstallType::Install {
+            self.info("Creating citadel passphrase file")?;
+            if let Ok(hash) = sha512_crypt::hash(self.citadel_passphrase()) {
+                let contents = format!("citadel:{}\n", hash);
+                util::create_dir(self.storage().join("citadel-state"))?;
+                util::write_file(self.storage().join("citadel-state/passwd"), contents)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn install_rootfs_partitions(&self) -> Result<()> {
         self.header("Installing rootfs partitions")?;
         let rootfs = self.artifact_path("citadel-rootfs.img");
         self.cmd(format!("/usr/bin/citadel-image install-rootfs --skip-sha {}", rootfs.display()))?;
         self.cmd(format!("/usr/bin/citadel-image install-rootfs --skip-sha --no-prefer {}", rootfs.display()))
     }
 
-    fn finish_install(&self) -> Result<()> {
+    pub fn finish_install(&self) -> Result<()> {
         self.cmd_list(FINISH_COMMANDS, &[
             ("$TARGET", self.target_str())
         ])

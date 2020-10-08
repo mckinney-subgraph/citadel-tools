@@ -3,6 +3,8 @@ name = "citadel-tool"
 version = "0.1.0"
 authors = ["Bruce Leidl <bruce@subgraph.com>"]
 edition = "2018"
+description = "citadel-tool"
+homepage = "https://subgraph.com"
 
 [dependencies]
 libcitadel = { path = "../libcitadel" }
@@ -14,4 +16,5 @@ serde = "1.0"
 toml = "0.5"
 hex = "0.4"
 byteorder = "1"
-
+dbus = "0.8.4"
+pwhash = "0.3.1"

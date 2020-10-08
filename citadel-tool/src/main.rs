@@ -11,6 +11,7 @@ use libcitadel::RealmManager;
 mod boot;
 mod image;
 mod install;
+mod install_backend;
 mod mkimage;
 mod realmfs;
 mod sync;
@@ -30,6 +31,8 @@ fn main() {
         boot::main(args);
     } else if exe == Path::new("/usr/libexec/citadel-install") {
         install::main(args);
+    } else if exe == Path::new("/usr/libexec/citadel-install-backend") {
+        install_backend::main();
     } else if exe == Path::new("/usr/bin/citadel-image") {
         image::main(args);
     } else if exe == Path::new("/usr/bin/citadel-realmfs") {

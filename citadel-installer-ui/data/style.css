@@ -1,0 +1,22 @@
+button.default:not(disabled) {
+  background: #027b40;
+  color: #D1D7d7;
+}
+
+button.default:disabled {
+  background: #D1D7d7;
+  color: #929595;
+}
+
+button {
+  background: #D1D7d7;
+}
+
+headerbar {
+  background: #3C4141;
+}
+
+text {
+  background: #4C575C;
+  color: #D1D7D7;
+}
