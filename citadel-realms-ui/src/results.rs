@@ -60,7 +60,9 @@ impl ResultItem {
                 }
 
                 if entity.description().is_empty() {
-                    desc.destroy();
+                    unsafe {
+                        desc.destroy();
+                    }
                 } else {
                     desc.set_text(entity.description());
                 }

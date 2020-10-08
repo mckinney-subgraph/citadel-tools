@@ -1,7 +1,7 @@
 
 use gtk::prelude::*;
 use gdk::ModifierType;
-use gdk::enums::key;
+use gdk::keys::constants;
 use crate::{Result,Builder};
 use crate::realms::Entity;
 use std::collections::HashMap;
@@ -102,11 +102,13 @@ impl ConfigDialog {
             move |_,key| {
                 let state = key.get_state();
                 let keyval = key.get_keyval();
-                let esc = keyval == key::Escape ||
-                    (state == ModifierType::CONTROL_MASK && keyval == '[' as u32);
+                let esc = keyval == constants::Escape ||
+                    (state == ModifierType::CONTROL_MASK && keyval.to_unicode().unwrap() == '[');
                 if esc {
                     parent.show();
-                    win.destroy();
+                    unsafe {
+                        win.destroy();
+                    }
                 }
                 Inhibit(false)
 
