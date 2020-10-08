@@ -5,6 +5,9 @@ use super::disk::Disk;
 use rpassword;
 use crate::install::installer::Installer;
 
+const CITADEL_PASSPHRASE_PROMPT: &str = "Enter a password for the Citadel user (or 'q' to quit)";
+const LUKS_PASSPHRASE_PROMPT: &str = "Enter a disk encryption passphrase (or 'q' to quit";
+
 pub fn run_cli_install() -> Result<bool> {
     let disk = match choose_disk()? {
         Some(disk) => disk,
@@ -13,7 +16,12 @@ pub fn run_cli_install() -> Result<bool> {
 
     display_disk(&disk);
 
-    let passphrase = match read_passphrase().map_err(context!("error reading passphrase"))? {
+    let citadel_passphrase = match read_passphrase(CITADEL_PASSPHRASE_PROMPT).map_err(context!("error reading citadel user passphrase"))? {
+        Some(citadel_passphrase) => citadel_passphrase,
+        None => return Ok(false),
+    };
+
+    let passphrase = match read_passphrase(LUKS_PASSPHRASE_PROMPT).map_err(context!("error reading luks passphrase"))? {
         Some(passphrase) => passphrase,
         None => return Ok(false),
     };
@@ -21,7 +29,7 @@ pub fn run_cli_install() -> Result<bool> {
     if !confirm_install(&disk)? {
         return Ok(false);
     }
-    run_install(disk, passphrase)?;
+    run_install(disk, citadel_passphrase, passphrase)?;
     Ok(true)
 }
 
@@ -29,7 +37,12 @@ pub fn run_cli_install_with<P: AsRef<Path>>(target: P) -> Result<bool> {
     let disk = find_disk_by_path(target.as_ref())?;
     display_disk(&disk);
 
-    let passphrase = match read_passphrase().map_err(context!("error reading passphrase"))? {
+    let citadel_passphrase = match read_passphrase(CITADEL_PASSPHRASE_PROMPT).map_err(context!("error reading citadel user passphrase"))? {
+        Some(citadel_passphrase) => citadel_passphrase,
+        None => return Ok(false),
+    };
+
+    let passphrase = match read_passphrase(LUKS_PASSPHRASE_PROMPT).map_err(context!("error reading luks passphrase"))? {
         Some(passphrase) => passphrase,
         None => return Ok(false),
     };
@@ -38,12 +51,12 @@ pub fn run_cli_install_with<P: AsRef<Path>>(target: P) -> Result<bool> {
         return Ok(false);
     }
 
-    run_install(disk, passphrase)?;
+    run_install(disk, citadel_passphrase, passphrase)?;
     Ok(true)
 }
 
-fn run_install(disk: Disk, passphrase: String) -> Result<()> {
-    let mut install = Installer::new(disk.path(), &passphrase);
+fn run_install(disk: Disk, citadel_passphrase: String, passphrase: String) -> Result<()> {
+    let mut install = Installer::new(disk.path(), &citadel_passphrase, &passphrase);
     install.set_install_syslinux(true);
     install.verify()?;
     install.run()
@@ -108,9 +121,9 @@ fn read_line() -> Result<String> {
     Ok(input)
 }
 
-fn read_passphrase() -> io::Result<Option<String>> {
+fn read_passphrase(prompt: &str) -> io::Result<Option<String>> {
     loop {
-        println!("Enter a disk encryption passphrase (or 'q' to quit)");
+        println!("{}", prompt);
         println!();
         let passphrase = rpassword::read_password_from_tty(Some("  Passphrase : "))?;
         if passphrase.is_empty() {
