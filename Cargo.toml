@@ -1,5 +1,5 @@
 [workspace]
-members = ["citadel-realms", "citadel-realms-ui", "citadel-tool", "realmsd" ]
+members = ["citadel-realms", "citadel-realms-ui", "citadel-installer-ui", "citadel-tool", "realmsd" ]
 [profile.release]
 lto = true
 codegen-units = 1

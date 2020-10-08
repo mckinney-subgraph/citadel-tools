@@ -8,7 +8,7 @@ pub struct Builder {
 
 impl Builder {
     pub fn new(source: &str) -> Self {
-        let builder = gtk::Builder::new_from_string(source);
+        let builder = gtk::Builder::from_string(source);
         Builder { builder }
     }
 

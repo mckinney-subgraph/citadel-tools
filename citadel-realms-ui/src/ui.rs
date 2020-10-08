@@ -2,7 +2,8 @@
 use gtk::prelude::*;
 use gtk::StyleContext;
 use gdk::ModifierType;
-use gdk::enums::key;
+use gdk::keys::constants;
+use gdk::keys::Key;
 
 use crate::matcher::Matcher;
 use crate::results::ResultList;
@@ -63,9 +64,8 @@ impl Ui {
         self.input.connect_activate(move |_| { ui.on_activate() });
         let ui = self.clone();
         self.input.connect_changed(move |e| {
-            if let Some(s) = e.get_text() {
-                ui.on_entry_changed(s.as_str());
-            }
+            let s = e.get_text();
+            ui.on_entry_changed(s.to_string().as_str());
         });
         let ui = self.clone();
         self.input.connect_key_press_event(move |_,k| {
@@ -125,9 +125,9 @@ impl Ui {
         self.window.resize(w, h);
     }
 
-    fn is_escape_key(keyval: key::Key, state: ModifierType) -> bool {
-        keyval == key::Escape || 
-            (state == ModifierType::CONTROL_MASK && keyval == '[' as u32)
+    fn is_escape_key(keyval: gdk::keys::Key, state: ModifierType) -> bool {
+        keyval == constants::Escape ||
+            (state == ModifierType::CONTROL_MASK && keyval.to_unicode().unwrap() == '[')
     }
 
     fn on_key_press(&self, key: &gdk::EventKey) {
@@ -137,12 +137,12 @@ impl Ui {
         if Self::is_escape_key(key.get_keyval(), key.get_state()) {
             gtk::main_quit();
         }
-        if keyval == key::Up {
+        if keyval == constants::Up {
             self.result_list.selection_up();
-        } else if keyval == key::Down {
+        } else if keyval == constants::Down {
             self.result_list.selection_down();
         } else if state == ModifierType::CONTROL_MASK {
-            match keyval as u8 as char {
+            match keyval.to_unicode().unwrap() {
                 'n'|'j' => self.result_list.selection_down(),
                 'p'|'k' => self.result_list.selection_up(),
                 _ => {},
