@@ -299,28 +299,47 @@ impl ResourceImage {
     }
 
     // Process a single line from the resource image manifest file.
+    //
     // Each line describes a bind mount from the resource image root to the system root fs.
-    // The line may contain either a single path or a pair of source and target paths separated by the colon (':') character.
+    //
+    // The line may contain either a single path or a pair of source and target paths separated by
+    // the colon (':') character.
+    //
     // If no colon character is present then the source and target paths are the same.
-    // The source path from the mounted resource image will be bind mounted to the target path on the system rootfs.
+    //
+    // The source path from the mounted resource image will be bind mounted to the target path on
+    // the system rootfs (unless the source path begins with '/sysroot' in which case both the source
+    // and target are paths on the system rootfs).
+    //
     fn process_manifest_line(&self, line: &str) -> Result<()> {
-        let line = line.trim_start_matches('/');
 
         let (path_from, path_to) = if line.contains(':') {
             let v = line.split(':').collect::<Vec<_>>();
             if v.len() != 2 {
                 bail!("badly formed line '{}'", line);
             }
-            (v[0], v[1].trim_start_matches('/'))
+            (v[0], v[1])
         } else {
-            (line, line)
+            (line,line)
         };
 
-        let from = self.mount_path().join(path_from);
-        let to = Path::new("/sysroot").join(path_to);
+        let from = if path_from.starts_with("/sysroot/") {
+            Path::new(path_from).to_owned()
+        } else {
+            self.mount_path().join(path_from.trim_start_matches('/'))
+        };
 
-        info!("Bind mounting {} to {} from manifest", from.display(), to.display());
-        util::mount(&from.to_string_lossy(), to, Some("--bind"))
+        let to = Path::new("/sysroot").join(path_to.trim_start_matches("/"));
+
+        if !from.exists() {
+            warn!("Skipping bind mount of {} to {} because source path does not exist", from.display(), to.display());
+        } else if !to.exists() {
+            warn!("Skipping bind mount of {} to {} because target path does not exist", from.display(), to.display());
+        } else {
+            info!("Bind mounting {} to {} from manifest", from.display(), to.display());
+            util::mount(&from.to_string_lossy(), to, Some("--bind"))?;
+        }
+        Ok(())
     }
 
     // If the /storage directory is not mounted, attempt to mount it.
