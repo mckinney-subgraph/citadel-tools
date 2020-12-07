@@ -20,6 +20,7 @@ pub fn main(args: Vec<String>) {
     let result = match args.get(1) {
         Some(s) if s == "rootfs" => do_rootfs(),
         Some(s) if s == "setup" => do_setup(),
+        Some(s) if s == "boot-automount" => do_boot_automount(),
         Some(s) if s == "start-realms" => do_start_realms(),
         _ => Err(format_err!("Bad or missing argument").into()),
     };
@@ -29,6 +30,7 @@ pub fn main(args: Vec<String>) {
         exit(1);
     }
 }
+
 
 fn do_rootfs() -> Result<()> {
     if CommandLine::live_mode() || CommandLine::install_mode() {
@@ -59,11 +61,9 @@ fn do_setup() -> Result<()> {
         mount_overlay()?;
     }
 
-    if !(CommandLine::live_mode() || CommandLine::install_mode()) {
-        write_boot_automount()?;
-    }
     Ok(())
 }
+
 
 fn mount_overlay() -> Result<()> {
     info!("Creating rootfs overlay");
@@ -94,22 +94,32 @@ fn do_start_realms() -> Result<()> {
     manager.start_boot_realms()
 }
 
-// Try to determine which partition on the system is the /boot partition and
-// generate mount/automount units for it.
-fn write_boot_automount() -> Result<()> {
+// Write automount unit for /boot partition
+fn do_boot_automount() -> Result<()> {
     Logger::set_log_level(LogLevel::Info);
+
+    if CommandLine::live_mode() || CommandLine::install_mode() {
+        info!("Skipping creation of /boot automount units for live/install mode");
+        return Ok(());
+    }
+
+    let boot_partition = find_boot_partition()?;
+    info!("Creating /boot automount units for boot partition {}", boot_partition);
+    cmd!("/usr/bin/systemd-mount", "-A --timeout-idle-sec=300 {} /boot", boot_partition)
+}
+
+fn find_boot_partition() -> Result<String> {
     let loader_dev = read_loader_dev_efi_var()?;
     let boot_partitions = DiskPartition::boot_partitions(true)?
         .into_iter()
         .filter(|part| matches_loader_dev(part, &loader_dev))
         .collect::<Vec<_>>();
 
-    if boot_partitions.len() == 1 {
-        write_automount_units(&boot_partitions[0])?;
-    } else {
-        warn!("Not writing /boot automount units because cannot uniquely determine boot partition");
+    if boot_partitions.len() != 1 {
+        return Err(format_err!("Cannot uniquely determine boot partition"));
     }
-    Ok(())
+
+    Ok(boot_partitions[0].path().display().to_string())
 }
 
 // if the 'loader device' EFI variable is set, then dev will contain the UUID
@@ -146,30 +156,3 @@ fn read_loader_dev_efi_var() -> Result<Option<String>> {
         Ok(None)
     }
 }
-
-pub fn write_automount_units(partition: &DiskPartition) -> Result<()> {
-    let dev = partition.path().display().to_string();
-    info!("Writing /boot automount units to /run/systemd/system for {}", dev);
-    let mount_unit = BOOT_MOUNT_UNIT.replace("$PARTITION", &dev);
-    util::write_file("/run/systemd/system/boot.mount", &mount_unit)?;
-    util::write_file("/run/systemd/system/boot.automount", BOOT_AUTOMOUNT_UNIT)?;
-    info!("Starting /boot automount service");
-    cmd!("/usr/bin/systemctl", "start boot.automount")?;
-    Ok(())
-}
-
-const BOOT_AUTOMOUNT_UNIT: &str = "\
-[Unit]
-Description=Automount /boot partition
-[Automount]
-Where=/boot
-TimeoutIdleSec=300
-";
-
-const BOOT_MOUNT_UNIT: &str = "\
-[Unit]
-Description=Mount /boot partition
-[Mount]
-What=$PARTITION
-Where=/boot
-";

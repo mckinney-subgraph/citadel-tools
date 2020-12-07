@@ -1,0 +1,11 @@
+[Unit]
+Description=Create /boot Automount Units
+Before=boot-complete.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=true
+ExecStart=/usr/libexec/citadel-boot boot-automount
+
+[Install]
+WantedBy=multi-user.target
