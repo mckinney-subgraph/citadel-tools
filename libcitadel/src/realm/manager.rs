@@ -91,7 +91,7 @@ impl RealmManager {
     pub fn launch_terminal(&self, realm: &Realm) -> Result<()> {
         info!("opening terminal in realm '{}'", realm.name());
         let title_arg = format!("Realm: {}", realm.name());
-        let args = &["/usr/bin/gnome-terminal".to_owned(), "--title".to_owned(), title_arg];
+        let args = &["/usr/bin/x-terminal-emulator".to_owned(), "--title".to_owned(), title_arg];
         Systemd::machinectl_shell(realm, args, "user", true, true)?;
         Ok(())
     }
