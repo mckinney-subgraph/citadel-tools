@@ -65,6 +65,9 @@ pub struct RealmConfig {
     #[serde(rename="use-wayland")]
     pub use_wayland: Option<bool>,
 
+    #[serde(rename="wayland-socket")]
+    pub wayland_socket: Option<String>,
+ 
     #[serde(rename="use-kvm")]
     pub use_kvm: Option<bool>,
 
@@ -188,6 +191,7 @@ impl RealmConfig {
             use_sound: Some(true),
             use_x11: Some(true),
             use_wayland: Some(true),
+            wayland_socket: Some("wayland-0".to_string()),
             use_kvm: Some(false),
             use_gpu: Some(false),
             use_gpu_card0: Some(false),
@@ -217,6 +221,7 @@ impl RealmConfig {
             use_sound: None,
             use_x11: None,
             use_wayland: None,
+            wayland_socket: None,
             use_kvm: None,
             use_gpu: None,
             use_gpu_card0: None,
@@ -245,8 +250,6 @@ impl RealmConfig {
     pub fn kvm(&self) -> bool {
         self.bool_value(|c| c.use_kvm)
     }
-
-
 
     /// If `true` render node device /dev/dri/renderD128 will be added to realm.
     ///
@@ -317,6 +320,12 @@ impl RealmConfig {
     /// wayland socket /run/user/1000/wayland-0
     pub fn wayland(&self) -> bool {
         self.bool_value(|c| c.use_wayland)
+    }
+
+    /// The name of the wayland socket to use if `self.wayland()` is `true` 
+    /// defaults to wayland-0, will appear in the realm as wayland-0 regardless of value
+    pub fn wayland_socket(&self) -> &str {
+        self.str_value(|c| c.wayland_socket.as_ref()).unwrap_or("wayland-0")
     }
 
     /// If `true` the realm will have access to the network through the zone specified

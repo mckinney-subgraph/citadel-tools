@@ -140,7 +140,9 @@ impl <'a> RealmLauncher <'a> {
         }
 
         if config.wayland() {
-            writeln!(s, "BindReadOnly=/run/user/1000/wayland-0:/run/user/host/wayland-0")?;
+            // This socket will always be mounted in the realm as wayland-0, regardless of the
+            // value of wayland_socket()
+            writeln!(s, "BindReadOnly=/run/user/1000/{}:/run/user/host/wayland-0", config.wayland_socket())?;
         }
 
         for bind in config.extra_bindmounts() {
@@ -206,7 +208,6 @@ impl <'a> RealmLauncher <'a> {
         for dev in &self.devices {
             writeln!(s, "DeviceAllow={}", dev).unwrap();
         }
-
         REALM_SERVICE_TEMPLATE.replace("$REALM_NAME", self.realm.name())
             .replace("$ROOTFS", &rootfs)
             .replace("$NETNS_ARG", &netns_arg)
@@ -227,3 +228,4 @@ impl From<fmt::Error> for crate::Error {
         format_err!("Error formatting string: {}", e).into()
     }
 }
+
