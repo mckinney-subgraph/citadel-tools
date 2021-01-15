@@ -25,7 +25,7 @@ fn main() {
                 gtk::DialogFlags::empty(),
                 gtk::MessageType::Error,
                 gtk::ButtonsType::Cancel,
-                "Citadel Installer can only be run during install or live mode");
+                "Citadel Installer can only be run during install mode");
             dialog.run();
         } else {
             match Ui::build(app) {

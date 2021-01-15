@@ -6,7 +6,7 @@ mod dbus;
 use libcitadel::CommandLine;
 
 pub fn main() {
-    if CommandLine::live_mode() || CommandLine::install_mode() {
+    if CommandLine::install_mode() {
         if let Err(e) = run_dbus_server() {
             warn!("Error: {}", e);
         }

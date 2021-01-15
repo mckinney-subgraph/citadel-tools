@@ -3,6 +3,8 @@ name = "citadel-installer-ui"
 version = "0.1.0"
 authors = ["David McKinney <mckinney@subgraph.com>"]
 edition = "2018"
+description = "Citadel Installer UI"
+homepage = "https://subgraph.com"
 
 [dependencies]
 libcitadel = { path = "../libcitadel" }
