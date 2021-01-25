@@ -198,6 +198,14 @@ impl RealmFS {
         self.name.as_str()
     }
 
+    pub fn set_name(&mut self, new_name: &str) {
+        if let Some(name) = Arc::get_mut(&mut self.name) {
+            *name = new_name.to_string();
+        } else {
+            warn!("Cannot set name");
+        }
+    }
+
     pub fn notes(&self) -> Option<String> {
         let path = self.path_with_extension("notes");
         if path.exists() {
@@ -224,8 +232,8 @@ impl RealmFS {
     // Each time RealmFS header is accessed, verify that the header on disk has not changed.
     // If the header changes generate a new mountpoint instance because the verity tag may
     // have changed.
-    fn check_stale_header(&self) -> Result<()> {
-        if self.header.reload_if_stale(self.path())? {
+    fn check_stale_header(&self, force_refresh: bool) -> Result<()> {
+        if force_refresh || self.header.reload_if_stale(self.path())? {
             let mut lock = self.mountpoint.write().unwrap();
             *lock = Mountpoint::new(self.name(), self.header.metainfo().verity_tag());
         }
@@ -233,7 +241,7 @@ impl RealmFS {
     }
 
     pub fn header(&self) -> &ImageHeader {
-        if let Err(err) = self.check_stale_header() {
+        if let Err(err) = self.check_stale_header(false) {
             warn!("error reloading stale image header: {}", err);
         }
         &self.header
@@ -306,7 +314,7 @@ impl RealmFS {
                 if new_path.exists() {
                     let _ = fs::remove_file(&new_path);
                 }
-                bail!("Failed to fork RealmFS '{}' to '{}': {}", self.name, new_name, err);
+                bail!("Failed to fork RealmFS '{}' to '{}': {}", self.name(), new_name, err);
             }
         };
 
@@ -319,8 +327,10 @@ impl RealmFS {
         self.copy_image_file(new_path)?;
         let metainfo_bytes = self.fork_metainfo(new_name);
         let sig = keys.sign(&metainfo_bytes);
-        let forked = Self::load_from_path(new_path)?;
+        let mut forked = Self::load_from_path(new_path)?;
+        forked.set_name(new_name);
         forked.header().update_metainfo(&metainfo_bytes, sig.to_bytes(), new_path)?;
+        forked.check_stale_header(true)?;
         Ok(forked)
     }
 
