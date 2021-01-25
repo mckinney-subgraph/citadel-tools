@@ -3,7 +3,6 @@ use gtk::prelude::*;
 use gtk::StyleContext;
 use gdk::ModifierType;
 use gdk::keys::constants;
-use gdk::keys::Key;
 
 use crate::matcher::Matcher;
 use crate::results::ResultList;
@@ -107,7 +106,7 @@ impl Ui {
         if self.result_list.activate_selected(&self.window) {
             println!("activated");
             self.input.set_text("");
-            gtk::idle_add({
+            glib::idle_add_local({
                 let (w,h) = self.window_size;
                 let window = self.window.clone();
                 move || {
