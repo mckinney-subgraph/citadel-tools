@@ -765,12 +765,28 @@ fn create_schemes() -> HashMap<String, Base16Scheme> {
         0xF80059, 0xBD0152, 0x82034C, 0x470546,
     ]));
 
+    schemes.insert(String::from("helios"), Base16Scheme::new("helios", "Helios",
+    vec![
+        0x1d2021, 0x383c3e, 0x53585b, 0x6f7579,
+        0xcdcdcd, 0xd5d5d5, 0xdddddd, 0xe5e5e5,
+        0xd72638, 0xeb8413, 0xf19d1a, 0x88b92d,
+        0x1ba595, 0x1e8bac, 0xbe4264, 0xc85e0d,
+    ]));
+
     schemes.insert(String::from("hopscotch"), Base16Scheme::new("hopscotch", "Hopscotch",
     vec![
         0x322931, 0x433b42, 0x5c545b, 0x797379,
         0x989498, 0xb9b5b8, 0xd5d3d5, 0xffffff,
         0xdd464c, 0xfd8b19, 0xfdcc59, 0x8fc13e,
         0x149b93, 0x1290bf, 0xc85e7c, 0xb33508,
+    ]));
+
+    schemes.insert(String::from("horizon-dark"), Base16Scheme::new("horizon-dark", "Horizon Dark",
+    vec![
+        0x1c1e26, 0x232530, 0x2e303e, 0x676a8d,
+        0xced1d0, 0xcbced0, 0xdcdfe4, 0xe3e6ee,
+        0xe93c58, 0xe58d7d, 0xefb993, 0xefaf8e,
+        0x24a8b4, 0xdf5273, 0xb072d1, 0xe4a382,
     ]));
 
     schemes.insert(String::from("ia-dark"), Base16Scheme::new("ia-dark", "iA Dark",
@@ -1107,6 +1123,14 @@ fn create_schemes() -> HashMap<String, Base16Scheme> {
         0xBFBBBF, 0xDFDBDF, 0xEFEBEF, 0xFFFBFF,
         0xB53B50, 0xE4600E, 0xDAE84D, 0x06EA61,
         0x7CEDE9, 0x03AEFF, 0xEA5CE2, 0x9D4D0E,
+    ]));
+
+    schemes.insert(String::from("tomorrow-night-eighties"), Base16Scheme::new("tomorrow-night-eighties", "Tomorrow Night Eighties",
+    vec![
+        0x2d2d2d, 0x393939, 0x515151, 0x999999,
+        0xb4b7b4, 0xcccccc, 0xe0e0e0, 0xffffff,
+        0xf2777a, 0xf99157, 0xffcc66, 0x99cc99,
+        0x66cccc, 0x6699cc, 0xcc99cc, 0xa3685a,
     ]));
 
     schemes.insert(String::from("tomorrow-night"), Base16Scheme::new("tomorrow-night", "Tomorrow Night",
